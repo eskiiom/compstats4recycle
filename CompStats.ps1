@@ -27,31 +27,43 @@ function Get-CPUInfo {
 
 # Function to get RAM information
 function Get-RAMInfo {
-    $rams = Get-CimInstance Win32_PhysicalMemory
+    $rams = Get-WmiObject Win32_PhysicalMemory
     $total = ($rams | Measure-Object -Property Capacity -Sum).Sum / 1GB
-    $array = Get-CimInstance Win32_PhysicalMemoryArray
+    $array = Get-WmiObject Win32_PhysicalMemoryArray
     $maxSlots = $array.MemoryDevices
     $occupiedSlots = $rams.Count
     $details = @()
-    for ($i = 0; $i -lt $maxSlots; $i++) {
-        if ($i -lt $occupiedSlots) {
-            $ram = $rams[$i]
-            $details += @{
-                Slot = "Slot $($i+1)"
-                Manufacturer = $ram.Manufacturer
-                Model = $ram.PartNumber
-                Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
-                Status = "Occupé"
-            }
-        } else {
-            $details += @{
-                Slot = "Slot $($i+1)"
-                Manufacturer = ""
-                Model = ""
-                Capacity = ""
-                Status = "Vide"
+    if ($occupiedSlots -gt 0) {
+        for ($i = 0; $i -lt $maxSlots; $i++) {
+            if ($i -lt $occupiedSlots) {
+                $ram = $rams[$i]
+                $details += @{
+                    Slot = "Slot $($i+1)"
+                    Manufacturer = $ram.Manufacturer
+                    Model = $ram.PartNumber
+                    Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
+                    Status = "Occupé"
+                }
+            } else {
+                $details += @{
+                    Slot = "Slot $($i+1)"
+                    Manufacturer = ""
+                    Model = ""
+                    Capacity = ""
+                    Status = "Vide"
+                }
             }
         }
+    } else {
+        # Soldered or not detected
+        $details += @{
+            Slot = "Intégré"
+            Manufacturer = "Intégré"
+            Model = "N/A"
+            Capacity = "$([math]::Round($total, 2)) GB"
+            Status = "Intégré"
+        }
+        $maxSlots = 1
     }
     return @{
         Total = "$([math]::Round($total, 2)) GB"
@@ -75,24 +87,8 @@ function Get-HDDInfo {
     return $details
 }
 
-# Function to get battery information
+# Function to get battery information using powercfg
 function Get-BatteryInfo {
-    # Try WMI first
-    $battery = Get-CimInstance Win32_Battery
-    if ($battery) {
-        $design = $battery.DesignCapacity
-        $full = $battery.FullChargeCapacity
-        $health = if ($design -gt 0 -and $full -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { "N/A" }
-        $installDate = $battery.InstallDate
-        $age = if ($installDate) { $ageDays = (Get-Date) - $installDate; "$($ageDays.Days) days" } else { "Unknown" }
-        return @{
-            Age = $age
-            DesignCapacity = if ($design) { "$design mWh" } else { "N/A" }
-            MeasuredCapacity = if ($full) { "$full mWh" } else { "N/A" }
-            Health = if ($health -is [double]) { "$health%" } else { $health }
-        }
-    }
-    # Fallback to powercfg
     $tempFile = Join-Path $env:TEMP "battery_report.html"
     try {
         & powercfg /batteryreport /output $tempFile | Out-Null
@@ -101,14 +97,13 @@ function Get-BatteryInfo {
             # Parse HTML for battery info
             $designMatch = $content | Select-String '<span id="DesignCapacity">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
             $fullMatch = $content | Select-String '<span id="FullChargeCapacity">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
-            $healthMatch = $content | Select-String '<span id="BatteryHealth">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
-            $ageMatch = $content | Select-String '<span id="BatteryLife">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
+            $cycleMatch = $content | Select-String '<span id="CycleCount">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
             if ($designMatch -and $fullMatch) {
                 $design = [int]($designMatch -replace '[^0-9]', '')
                 $full = [int]($fullMatch -replace '[^0-9]', '')
                 $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
                 return @{
-                    Age = $ageMatch
+                    Age = if ($cycleMatch) { "$cycleMatch cycles" } else { "Unknown" }
                     DesignCapacity = "$design mWh"
                     MeasuredCapacity = "$full mWh"
                     Health = "$health%"
@@ -131,24 +126,30 @@ function Get-SMARTData {
     if (Test-Path $smartctl) {
         $smartctlPath = $smartctl
     } else {
-        # Check if installed in PATH
-        try {
-            $cmd = Get-Command smartctl -ErrorAction Stop
-            $smartctlPath = $cmd.Source
-        } catch {
-            # Download smartctl.exe
+        # Check default installation path
+        $defaultPath = "C:\Program Files\smartmontools\bin\smartctl.exe"
+        if (Test-Path $defaultPath) {
+            $smartctlPath = $defaultPath
+        } else {
+            # Check if installed in PATH
             try {
-                $zipUrl = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32.zip"
-                $zipPath = Join-Path $env:TEMP "smartmontools.zip"
-                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
-                $extractPath = Join-Path $env:TEMP "smartmontools"
-                Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
-                $sourceSmartctl = Join-Path $extractPath "bin\smartctl.exe"
-                Copy-Item $sourceSmartctl $smartctl
-                $smartctlPath = $smartctl
-                Remove-Item $zipPath, $extractPath -Recurse -Force
+                $cmd = Get-Command smartctl -ErrorAction Stop
+                $smartctlPath = $cmd.Source
             } catch {
-                return "smartctl.exe not found"
+                # Download smartctl.exe
+                try {
+                    $zipUrl = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32.zip"
+                    $zipPath = Join-Path $env:TEMP "smartmontools.zip"
+                    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+                    $extractPath = Join-Path $env:TEMP "smartmontools"
+                    Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+                    $sourceSmartctl = Join-Path $extractPath "bin\smartctl.exe"
+                    Copy-Item $sourceSmartctl $smartctl
+                    $smartctlPath = $smartctl
+                    Remove-Item $zipPath, $extractPath -Recurse -Force
+                } catch {
+                    return "smartctl.exe not found"
+                }
             }
         }
     }
