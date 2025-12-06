@@ -4,16 +4,14 @@
 # Generates an HTML report with system, CPU, RAM, HDD (with SMART), and Battery info
 
 param()
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # Function to get system information
 function Get-SystemInfo {
     $cs = Get-CimInstance Win32_ComputerSystem
-    $bios = Get-CimInstance Win32_BIOS
-    $year = if ($bios.ReleaseDate) { $bios.ReleaseDate.Year } else { "Unknown" }
     return @{
         Brand = $cs.Manufacturer
         Model = $cs.Model
-        Year = $year
     }
 }
 
@@ -31,15 +29,33 @@ function Get-CPUInfo {
 function Get-RAMInfo {
     $rams = Get-CimInstance Win32_PhysicalMemory
     $total = ($rams | Measure-Object -Property Capacity -Sum).Sum / 1GB
-    $details = $rams | ForEach-Object {
-        @{
-            Manufacturer = $_.Manufacturer
-            Model = $_.PartNumber
-            Capacity = "$([math]::Round($_.Capacity / 1GB, 2)) GB"
+    $array = Get-CimInstance Win32_PhysicalMemoryArray
+    $maxSlots = $array.MemoryDevices
+    $occupiedSlots = $rams.Count
+    $details = @()
+    for ($i = 0; $i -lt $maxSlots; $i++) {
+        if ($i -lt $occupiedSlots) {
+            $ram = $rams[$i]
+            $details += @{
+                Slot = "Slot $($i+1)"
+                Manufacturer = $ram.Manufacturer
+                Model = $ram.PartNumber
+                Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
+                Status = "Occupé"
+            }
+        } else {
+            $details += @{
+                Slot = "Slot $($i+1)"
+                Manufacturer = ""
+                Model = ""
+                Capacity = ""
+                Status = "Vide"
+            }
         }
     }
     return @{
         Total = "$([math]::Round($total, 2)) GB"
+        MaxSlots = $maxSlots
         Modules = $details
     }
 }
@@ -59,46 +75,76 @@ function Get-HDDInfo {
     return $details
 }
 
-# Function to get battery information
+# Function to get battery information using powercfg
 function Get-BatteryInfo {
-    $battery = Get-CimInstance Win32_Battery
-    if ($battery) {
-        $design = $battery.DesignCapacity
-        $full = $battery.FullChargeCapacity
-        $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
-        $installDate = $battery.InstallDate
-        $age = if ($installDate) { (Get-Date) - $installDate; "$($age.Days) days" } else { "Unknown" }
-        return @{
-            Age = $age
-            DesignCapacity = "$design mWh"
-            MeasuredCapacity = "$full mWh"
-            Health = "$health%"
+    $tempFile = Join-Path $env:TEMP "battery_report.html"
+    try {
+        & powercfg /batteryreport /output $tempFile | Out-Null
+        if (Test-Path $tempFile) {
+            $content = Get-Content $tempFile -Raw
+            # Parse HTML for battery info
+            $designMatch = $content | Select-String '<span id="DesignCapacity">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
+            $fullMatch = $content | Select-String '<span id="FullChargeCapacity">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
+            $healthMatch = $content | Select-String '<span id="BatteryHealth">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
+            $ageMatch = $content | Select-String '<span id="BatteryLife">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
+            if ($designMatch -and $fullMatch) {
+                $design = [int]($designMatch -replace '[^0-9]', '')
+                $full = [int]($fullMatch -replace '[^0-9]', '')
+                $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
+                return @{
+                    Age = $ageMatch
+                    DesignCapacity = "$design mWh"
+                    MeasuredCapacity = "$full mWh"
+                    Health = "$health%"
+                }
+            }
         }
-    } else {
-        return "No battery detected"
+    } catch {
+        # Fallback to WMI
+        $battery = Get-CimInstance Win32_Battery
+        if ($battery) {
+            $design = $battery.DesignCapacity
+            $full = $battery.FullChargeCapacity
+            $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
+            return @{
+                Age = "Unknown"
+                DesignCapacity = "$design mWh"
+                MeasuredCapacity = "$full mWh"
+                Health = "$health%"
+            }
+        }
+    } finally {
+        if (Test-Path $tempFile) { Remove-Item $tempFile }
     }
+    return "No battery detected"
 }
 
-# Function to get SMART data using smartctl.exe (must be in script directory)
+# Function to get SMART data using smartctl.exe
 function Get-SMARTData {
     param($deviceID)
     $smartctl = Join-Path $PSScriptRoot "smartctl.exe"
-    if (Test-Path $smartctl) {
+    if (-not (Test-Path $smartctl)) {
+        # Try to download smartctl.exe
         try {
-            $output = & $smartctl -a "\\.\PHYSICALDRIVE$deviceID" 2>$null
-            $errors = ($output | Select-String "Reallocated_Sector_Ct" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
-            $hours = ($output | Select-String "Power_On_Hours" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
-            $temp = ($output | Select-String "Temperature_Celsius" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
-            return @{
-                Errors = $errors
-                Hours = $hours
-                Temp = $temp
-            }
+            $url = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32-setup.exe"  # Example, but it's installer
+            # Actually, better to provide link, but for script, perhaps assume user downloads
+            return "smartctl.exe not found. Download from https://www.smartmontools.org/"
         } catch {
-            return "Error reading SMART data"
+            return "smartctl.exe not found"
         }
-    } else {
-        return "smartctl.exe not found in script directory"
+    }
+    try {
+        $output = & $smartctl -a "\\.\PHYSICALDRIVE$deviceID" 2>$null
+        $errors = ($output | Select-String "Reallocated_Sector_Ct" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
+        $hours = ($output | Select-String "Power_On_Hours" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
+        $temp = ($output | Select-String "Temperature_Celsius" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
+        return @{
+            Errors = $errors
+            Hours = $hours
+            Temp = $temp
+        }
+    } catch {
+        return "Error reading SMART data"
     }
 }
 
@@ -193,7 +239,6 @@ $html = @"
             <table>
                 <tr><th>Marque</th><td>$($system.Brand)</td></tr>
                 <tr><th>Modèle</th><td>$($system.Model)</td></tr>
-                <tr><th>Année de fabrication (approx.)</th><td>$($system.Year)</td></tr>
             </table>
         </div>
 
@@ -208,10 +253,10 @@ $html = @"
 
         <div class="section">
             <h2>RAM</h2>
-            <p><strong>Total:</strong> $($ram.Total)</p>
+            <p><strong>Total:</strong> $($ram.Total) - <strong>Slots:</strong> $($ram.MaxSlots)</p>
             <table>
-                <tr><th>Marque</th><th>Modèle</th><th>Capacité</th></tr>
-                $($ram.Modules | ForEach-Object { "<tr><td>$($_.Manufacturer)</td><td>$($_.Model)</td><td>$($_.Capacity)</td></tr>" })
+                <tr><th>Slot</th><th>Statut</th><th>Marque</th><th>Modèle</th><th>Capacité</th></tr>
+                $($ram.Modules | ForEach-Object { "<tr><td>$($_.Slot)</td><td>$($_.Status)</td><td>$($_.Manufacturer)</td><td>$($_.Model)</td><td>$($_.Capacity)</td></tr>" })
             </table>
         </div>
 
