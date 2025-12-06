@@ -33,37 +33,25 @@ function Get-RAMInfo {
     $maxSlots = $array.MemoryDevices
     $occupiedSlots = $rams.Count
     $details = @()
-    if ($occupiedSlots -gt 0) {
-        for ($i = 0; $i -lt $maxSlots; $i++) {
-            if ($i -lt $occupiedSlots) {
-                $ram = $rams[$i]
-                $details += @{
-                    Slot = "Slot $($i+1)"
-                    Manufacturer = $ram.Manufacturer
-                    Model = $ram.PartNumber
-                    Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
-                    Status = "Occupé"
-                }
-            } else {
-                $details += @{
-                    Slot = "Slot $($i+1)"
-                    Manufacturer = ""
-                    Model = ""
-                    Capacity = ""
-                    Status = "Vide"
-                }
+    for ($i = 0; $i -lt $maxSlots; $i++) {
+        if ($i -lt $occupiedSlots) {
+            $ram = $rams[$i]
+            $details += @{
+                Slot = "Slot $($i+1)"
+                Manufacturer = $ram.Manufacturer
+                Model = $ram.PartNumber
+                Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
+                Status = "Occupé"
+            }
+        } else {
+            $details += @{
+                Slot = "Slot $($i+1)"
+                Manufacturer = ""
+                Model = ""
+                Capacity = ""
+                Status = "Vide"
             }
         }
-    } else {
-        # Soldered RAM or not detected
-        $details += @{
-            Slot = "N/A"
-            Manufacturer = "Intégré"
-            Model = "N/A"
-            Capacity = "$([math]::Round($total, 2)) GB"
-            Status = "Intégré"
-        }
-        $maxSlots = 0
     }
     return @{
         Total = "$([math]::Round($total, 2)) GB"
@@ -137,24 +125,35 @@ function Get-BatteryInfo {
 # Function to get SMART data using smartctl.exe
 function Get-SMARTData {
     param($deviceID)
+    $smartctlPath = $null
+    # Check if smartctl is in script directory
     $smartctl = Join-Path $PSScriptRoot "smartctl.exe"
-    if (-not (Test-Path $smartctl)) {
-        # Download smartctl.exe
+    if (Test-Path $smartctl) {
+        $smartctlPath = $smartctl
+    } else {
+        # Check if installed in PATH
         try {
-            $zipUrl = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32.zip"
-            $zipPath = Join-Path $env:TEMP "smartmontools.zip"
-            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
-            $extractPath = Join-Path $env:TEMP "smartmontools"
-            Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
-            $sourceSmartctl = Join-Path $extractPath "bin\smartctl.exe"
-            Copy-Item $sourceSmartctl $smartctl
-            Remove-Item $zipPath, $extractPath -Recurse -Force
+            $cmd = Get-Command smartctl -ErrorAction Stop
+            $smartctlPath = $cmd.Source
         } catch {
-            return "Failed to download smartctl.exe"
+            # Download smartctl.exe
+            try {
+                $zipUrl = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32.zip"
+                $zipPath = Join-Path $env:TEMP "smartmontools.zip"
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+                $extractPath = Join-Path $env:TEMP "smartmontools"
+                Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+                $sourceSmartctl = Join-Path $extractPath "bin\smartctl.exe"
+                Copy-Item $sourceSmartctl $smartctl
+                $smartctlPath = $smartctl
+                Remove-Item $zipPath, $extractPath -Recurse -Force
+            } catch {
+                return "smartctl.exe not found"
+            }
         }
     }
     try {
-        $output = & $smartctl -a "\\.\PHYSICALDRIVE$deviceID" 2>$null
+        $output = & $smartctlPath -a "\\.\PHYSICALDRIVE$deviceID" 2>$null
         $errors = ($output | Select-String "Reallocated_Sector_Ct" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
         $hours = ($output | Select-String "Power_On_Hours" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
         $temp = ($output | Select-String "Temperature_Celsius" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
@@ -214,7 +213,7 @@ if ($battery -is [hashtable]) {
                         responsive: true,
                         plugins: {
                             legend: { position: 'bottom' },
-                            title: { display: true, text: 'État de Santé de la Batterie' }
+                            title: { display: true, text: '&Eacute;tat de Sant&eacute; de la Batterie' }
                         }
                     }
                 });
@@ -224,9 +223,9 @@ if ($battery -is [hashtable]) {
     $batteryHtml = @"
             <table>
                 <tr><th>Age approximatif</th><td>$($battery.Age)</td></tr>
-                <tr><th>Capacité constructeur</th><td>$($battery.DesignCapacity)</td></tr>
-                <tr><th>Capacité mesurée</th><td>$($battery.MeasuredCapacity)</td></tr>
-                <tr><th>État de santé</th><td class='$healthClass'>$healthValue</td></tr>
+                <tr><th>Capacit&eacute; constructeur</th><td>$($battery.DesignCapacity)</td></tr>
+                <tr><th>Capacit&eacute; mesur&eacute;e</th><td>$($battery.MeasuredCapacity)</td></tr>
+                <tr><th>&Eacute;tat de sant&eacute;</th><td class='$healthClass'>$healthValue</td></tr>
             </table>
             $chartScript
 "@
@@ -264,10 +263,10 @@ $html = @"
         <p><strong>Date de génération:</strong> $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")</p>
 
         <div class="section">
-            <h2>Système</h2>
+            <h2>Syst&egrave;me</h2>
             <table>
                 <tr><th>Marque</th><td>$($system.Brand)</td></tr>
-                <tr><th>Modèle</th><td>$($system.Model)</td></tr>
+                <tr><th>Mod&egrave;le</th><td>$($system.Model)</td></tr>
             </table>
         </div>
 
@@ -275,7 +274,7 @@ $html = @"
             <h2>CPU</h2>
             <table>
                 <tr><th>Marque</th><td>$($cpu.Brand)</td></tr>
-                <tr><th>Modèle</th><td>$($cpu.Model)</td></tr>
+                <tr><th>Mod&egrave;le</th><td>$($cpu.Model)</td></tr>
                 <tr><th>Vitesse maximale</th><td>$($cpu.Speed)</td></tr>
             </table>
         </div>
@@ -284,7 +283,7 @@ $html = @"
             <h2>RAM</h2>
             <p><strong>Total:</strong> $($ram.Total) - <strong>Slots:</strong> $($ram.MaxSlots)</p>
             <table>
-                <tr><th>Slot</th><th>Statut</th><th>Marque</th><th>Modèle</th><th>Capacité</th></tr>
+                <tr><th>Slot</th><th>Statut</th><th>Marque</th><th>Mod&egrave;le</th><th>Capacit&eacute;</th></tr>
                 $($ram.Modules | ForEach-Object { "<tr><td>$($_.Slot)</td><td>$($_.Status)</td><td>$($_.Manufacturer)</td><td>$($_.Model)</td><td>$($_.Capacity)</td></tr>" })
             </table>
         </div>
@@ -299,9 +298,9 @@ $html = @"
                 "<tr><th>Type</th><td>$($_.Type)</td></tr>"
                 "<tr><th>Taille</th><td>$($_.Size)</td></tr>"
                 if ($smart -is [hashtable]) {
-                    "<tr><th>Erreurs détectées (secteurs réalloués)</th><td class='$healthClass'>$($smart.Errors)</td></tr>"
+                    "<tr><th>Erreurs d&eacute;tect&eacute;es (secteurs r&eacute;allou&eacute;s)</th><td class='$healthClass'>$($smart.Errors)</td></tr>"
                     "<tr><th>Nombre d'heures d'utilisation</th><td>$($smart.Hours)</td></tr>"
-                    "<tr><th>Température actuelle</th><td class='$healthClass'>$($smart.Temp) °C</td></tr>"
+                    "<tr><th>Temp&eacute;rature actuelle</th><td class='$healthClass'>$($smart.Temp) &deg;C</td></tr>"
                 } else {
                     "<tr><th>SMART</th><td>$smart</td></tr>"
                 }
@@ -316,12 +315,12 @@ $html = @"
         </div>
 
         <div class="section">
-            <h2>Indicateurs de Santé Générale</h2>
+            <h2>Indicateurs de Sant&eacute; G&eacute;n&eacute;rale</h2>
             <ul>
-                <li><strong>Batterie:</strong> Si la santé est en dessous de 80%, considérer le remplacement.</li>
-                <li><strong>Disques:</strong> Erreurs SMART > 0 ou température > 50°C indiquent des problèmes potentiels.</li>
-                <li><strong>RAM/CPU:</strong> Pas d'indicateurs directs, mais vérifier la compatibilité et les performances.</li>
-                <li><strong>Températures:</strong> CPU et HDD devraient être < 60°C sous charge normale.</li>
+                <li><strong>Batterie:</strong> Si la sant&eacute; est en dessous de 80%, consid&eacute;rer le remplacement.</li>
+                <li><strong>Disques:</strong> Erreurs SMART > 0 ou temp&eacute;rature > 50&deg;C indiquent des probl&egrave;mes potentiels.</li>
+                <li><strong>RAM/CPU:</strong> Pas d'indicateurs directs, mais v&eacute;rifier la compatibilit&eacute; et les performances.</li>
+                <li><strong>Temp&eacute;ratures:</strong> CPU et HDD devraient &ecirc;tre < 60&deg;C sous charge normale.</li>
             </ul>
         </div>
     </div>
