@@ -27,43 +27,31 @@ function Get-CPUInfo {
 
 # Function to get RAM information
 function Get-RAMInfo {
-    $rams = Get-WmiObject Win32_PhysicalMemory
+    $rams = Get-CimInstance Win32_PhysicalMemory
     $total = ($rams | Measure-Object -Property Capacity -Sum).Sum / 1GB
-    $array = Get-WmiObject Win32_PhysicalMemoryArray
+    $array = Get-CimInstance Win32_PhysicalMemoryArray
     $maxSlots = $array.MemoryDevices
     $occupiedSlots = $rams.Count
     $details = @()
-    if ($occupiedSlots -gt 0) {
-        for ($i = 0; $i -lt $maxSlots; $i++) {
-            if ($i -lt $occupiedSlots) {
-                $ram = $rams[$i]
-                $details += @{
-                    Slot = "Slot $($i+1)"
-                    Manufacturer = $ram.Manufacturer
-                    Model = $ram.PartNumber
-                    Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
-                    Status = "Occupé"
-                }
-            } else {
-                $details += @{
-                    Slot = "Slot $($i+1)"
-                    Manufacturer = ""
-                    Model = ""
-                    Capacity = ""
-                    Status = "Vide"
-                }
+    for ($i = 0; $i -lt $maxSlots; $i++) {
+        if ($i -lt $occupiedSlots) {
+            $ram = $rams[$i]
+            $details += @{
+                Slot = "Slot $($i+1)"
+                Manufacturer = $ram.Manufacturer
+                Model = $ram.PartNumber
+                Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
+                Status = "Occupé"
+            }
+        } else {
+            $details += @{
+                Slot = "Slot $($i+1)"
+                Manufacturer = ""
+                Model = ""
+                Capacity = ""
+                Status = "Vide"
             }
         }
-    } else {
-        # Soldered or not detected
-        $details += @{
-            Slot = "Intégré"
-            Manufacturer = "Intégré"
-            Model = "N/A"
-            Capacity = "$([math]::Round($total, 2)) GB"
-            Status = "Intégré"
-        }
-        $maxSlots = 1
     }
     return @{
         Total = "$([math]::Round($total, 2)) GB"
@@ -90,29 +78,37 @@ function Get-HDDInfo {
 # Function to get battery information using powercfg
 function Get-BatteryInfo {
     $tempFile = Join-Path $env:TEMP "battery_report.html"
-    try {
-        & powercfg /batteryreport /output $tempFile | Out-Null
-        if (Test-Path $tempFile) {
-            $content = Get-Content $tempFile -Raw
-            # Parse HTML for battery info
-            $designMatch = $content | Select-String '<span id="DesignCapacity">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
-            $fullMatch = $content | Select-String '<span id="FullChargeCapacity">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
-            $cycleMatch = $content | Select-String '<span id="CycleCount">(.*?)</span>' | ForEach-Object { $_.Matches.Groups[1].Value }
-            if ($designMatch -and $fullMatch) {
-                $design = [int]($designMatch -replace '[^0-9]', '')
-                $full = [int]($fullMatch -replace '[^0-9]', '')
-                $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
-                return @{
-                    Age = if ($cycleMatch) { "$cycleMatch cycles" } else { "Unknown" }
-                    DesignCapacity = "$design mWh"
-                    MeasuredCapacity = "$full mWh"
-                    Health = "$health%"
-                }
+    $existingFile = Join-Path $PSScriptRoot "battery-report.html"
+    if (Test-Path $existingFile) {
+        $content = Get-Content $existingFile -Raw
+    } else {
+        try {
+            & powercfg /batteryreport /output $tempFile | Out-Null
+            if (Test-Path $tempFile) {
+                $content = Get-Content $tempFile -Raw
+            } else {
+                return "No battery detected"
             }
+        } catch {
+            return "No battery detected"
+        } finally {
+            if (Test-Path $tempFile) { Remove-Item $tempFile }
         }
-    } catch {
-    } finally {
-        if (Test-Path $tempFile) { Remove-Item $tempFile }
+    }
+    # Parse HTML for battery info
+    if ($content -match '<span id="DesignCapacity">(.*?)</span>') { $designMatch = $matches[1] }
+    if ($content -match '<span id="FullChargeCapacity">(.*?)</span>') { $fullMatch = $matches[1] }
+    if ($content -match '<span id="CycleCount">(.*?)</span>') { $cycleMatch = $matches[1] }
+    if ($designMatch -and $fullMatch) {
+        $design = [int]($designMatch -replace '[^0-9]', '')
+        $full = [int]($fullMatch -replace '[^0-9]', '')
+        $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
+        return @{
+            Age = if ($cycleMatch) { "$cycleMatch cycles" } else { "Unknown" }
+            DesignCapacity = "$design mWh"
+            MeasuredCapacity = "$full mWh"
+            Health = "$health%"
+        }
     }
     return "No battery detected"
 }
