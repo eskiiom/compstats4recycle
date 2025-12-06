@@ -94,14 +94,14 @@ function Get-BatteryInfo {
     if ($battery) {
         $design = $battery.DesignCapacity
         $full = $battery.FullChargeCapacity
-        $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
+        $health = if ($design -gt 0 -and $full -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { "N/A" }
         $installDate = $battery.InstallDate
         $age = if ($installDate) { $ageDays = (Get-Date) - $installDate; "$($ageDays.Days) days" } else { "Unknown" }
         return @{
             Age = $age
-            DesignCapacity = "$design mWh"
-            MeasuredCapacity = "$full mWh"
-            Health = "$health%"
+            DesignCapacity = if ($design) { "$design mWh" } else { "N/A" }
+            MeasuredCapacity = if ($full) { "$full mWh" } else { "N/A" }
+            Health = if ($health -is [double]) { "$health%" } else { $health }
         }
     }
     # Fallback to powercfg
@@ -186,19 +186,20 @@ $path = Join-Path $PSScriptRoot "$date.html"
 
 # Prepare battery HTML
 if ($battery -is [hashtable]) {
-    $batteryHtml = @"
-            <table>
-                <tr><th>Age approximatif</th><td>$($battery.Age)</td></tr>
-                <tr><th>Capacité constructeur</th><td>$($battery.DesignCapacity)</td></tr>
-                <tr><th>Capacité mesurée</th><td>$($battery.MeasuredCapacity)</td></tr>
-                <tr><th>État de santé</th><td class='$(if ([double]$battery.Health.Trim('%') -gt 80) { "health-good" } elseif ([double]$battery.Health.Trim('%') -gt 50) { "health-warning" } else { "health-bad" })'>$($battery.Health)</td></tr>
-            </table>
+    $healthValue = $battery.Health
+    $healthClass = if ($healthValue -match '^\d') {
+        $h = [double]$healthValue.Trim('%')
+        if ($h -gt 80) { "health-good" } elseif ($h -gt 50) { "health-warning" } else { "health-bad" }
+    } else { "" }
+    $chartScript = if ($healthValue -match '^\d') {
+        $h = [double]$healthValue.Trim('%')
+        @"
             <div class="chart-container">
                 <canvas id="batteryChart"></canvas>
             </div>
             <script>
                 var ctx = document.getElementById('batteryChart').getContext('2d');
-                var batteryHealth = $([double]$battery.Health.Trim('%'));
+                var batteryHealth = $h;
                 var batteryData = {
                     labels: ['Santé', 'Perte'],
                     datasets: [{
@@ -219,6 +220,16 @@ if ($battery -is [hashtable]) {
                     }
                 });
             </script>
+"@
+    } else { "" }
+    $batteryHtml = @"
+            <table>
+                <tr><th>Age approximatif</th><td>$($battery.Age)</td></tr>
+                <tr><th>Capacité constructeur</th><td>$($battery.DesignCapacity)</td></tr>
+                <tr><th>Capacité mesurée</th><td>$($battery.MeasuredCapacity)</td></tr>
+                <tr><th>État de santé</th><td class='$healthClass'>$healthValue</td></tr>
+            </table>
+            $chartScript
 "@
 } else {
     $batteryHtml = "<p>$battery</p>"
@@ -319,5 +330,7 @@ $html = @"
 </html>
 "@
 
-[System.IO.File]::WriteAllText($path, $html, [System.Text.Encoding]::UTF8)
+$stream = [System.IO.StreamWriter]::new($path, $false, [System.Text.Encoding]::UTF8)
+$stream.Write($html)
+$stream.Close()
 Write-Host "Rapport généré à $path"

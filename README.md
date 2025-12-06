@@ -17,12 +17,12 @@ Le rapport HTML est moderne, lisible et inclut des graphiques (état de santé d
 ## Utilisation
 
 1. Téléchargez le script `CompStats.ps1`.
-2. Pour les données SMART, téléchargez `smartctl.exe` depuis [smartmontools](https://www.smartmontools.org/) et placez-le dans le même dossier que le script (ou téléchargez l'installateur et extrayez smartctl.exe).
+2. Le script télécharge automatiquement `smartctl.exe` depuis smartmontools.org si nécessaire. Si le téléchargement échoue, téléchargez manuellement depuis [smartmontools](https://www.smartmontools.org/) et placez `smartctl.exe` dans le dossier du script.
 3. Exécutez le script avec PowerShell :
    ```
    powershell.exe -ExecutionPolicy Bypass -File .\CompStats.ps1
    ```
-4. Le rapport HTML sera généré dans `c:\compstats4recycle\` avec un nom basé sur la date.
+4. Le rapport HTML sera généré dans le dossier du script avec un nom basé sur la date.
 
 ## Indicateurs de Santé
 
