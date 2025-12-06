@@ -187,13 +187,12 @@ $path = Join-Path $PSScriptRoot "$date.html"
 # Prepare battery HTML
 if ($battery -is [hashtable]) {
     $healthValue = $battery.Health
-    $healthClass = if ($healthValue -match '^\d') {
+    $healthClass = ""
+    $chartScript = ""
+    if ($healthValue -match '^\d') {
         $h = [double]$healthValue.Trim('%')
-        if ($h -gt 80) { "health-good" } elseif ($h -gt 50) { "health-warning" } else { "health-bad" }
-    } else { "" }
-    $chartScript = if ($healthValue -match '^\d') {
-        $h = [double]$healthValue.Trim('%')
-        @"
+        $healthClass = if ($h -gt 80) { "health-good" } elseif ($h -gt 50) { "health-warning" } else { "health-bad" }
+        $chartScript = @"
             <div class="chart-container">
                 <canvas id="batteryChart"></canvas>
             </div>
@@ -221,7 +220,7 @@ if ($battery -is [hashtable]) {
                 });
             </script>
 "@
-    } else { "" }
+    }
     $batteryHtml = @"
             <table>
                 <tr><th>Age approximatif</th><td>$($battery.Age)</td></tr>
@@ -330,7 +329,5 @@ $html = @"
 </html>
 "@
 
-$stream = [System.IO.StreamWriter]::new($path, $false, [System.Text.Encoding]::UTF8)
-$stream.Write($html)
-$stream.Close()
+[System.IO.File]::WriteAllText($path, $html, [System.Text.Encoding]::UTF8)
 Write-Host "Rapport généré à $path"
