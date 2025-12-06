@@ -1,0 +1,5 @@
+# Ignore generated HTML reports
+*.html
+
+# Ignore smartctl.exe if downloaded
+smartctl.exe

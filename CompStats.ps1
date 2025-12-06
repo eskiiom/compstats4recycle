@@ -162,8 +162,7 @@ foreach ($hdd in $hdds) {
 
 # Generate HTML report
 $date = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$path = "c:\compstats4recycle\$date.html"
-New-Item -Path "c:\compstats4recycle" -ItemType Directory -Force | Out-Null
+$path = Join-Path $PSScriptRoot "$date.html"
 
 # Prepare battery HTML
 if ($battery -is [hashtable]) {
