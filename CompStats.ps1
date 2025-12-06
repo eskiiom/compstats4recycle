@@ -33,25 +33,37 @@ function Get-RAMInfo {
     $maxSlots = $array.MemoryDevices
     $occupiedSlots = $rams.Count
     $details = @()
-    for ($i = 0; $i -lt $maxSlots; $i++) {
-        if ($i -lt $occupiedSlots) {
-            $ram = $rams[$i]
-            $details += @{
-                Slot = "Slot $($i+1)"
-                Manufacturer = $ram.Manufacturer
-                Model = $ram.PartNumber
-                Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
-                Status = "Occupé"
-            }
-        } else {
-            $details += @{
-                Slot = "Slot $($i+1)"
-                Manufacturer = ""
-                Model = ""
-                Capacity = ""
-                Status = "Vide"
+    if ($occupiedSlots -gt 0) {
+        for ($i = 0; $i -lt $maxSlots; $i++) {
+            if ($i -lt $occupiedSlots) {
+                $ram = $rams[$i]
+                $details += @{
+                    Slot = "Slot $($i+1)"
+                    Manufacturer = $ram.Manufacturer
+                    Model = $ram.PartNumber
+                    Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
+                    Status = "Occupé"
+                }
+            } else {
+                $details += @{
+                    Slot = "Slot $($i+1)"
+                    Manufacturer = ""
+                    Model = ""
+                    Capacity = ""
+                    Status = "Vide"
+                }
             }
         }
+    } else {
+        # Soldered RAM or not detected
+        $details += @{
+            Slot = "N/A"
+            Manufacturer = "Intégré"
+            Model = "N/A"
+            Capacity = "$([math]::Round($total, 2)) GB"
+            Status = "Intégré"
+        }
+        $maxSlots = 0
     }
     return @{
         Total = "$([math]::Round($total, 2)) GB"
@@ -75,8 +87,24 @@ function Get-HDDInfo {
     return $details
 }
 
-# Function to get battery information using powercfg
+# Function to get battery information
 function Get-BatteryInfo {
+    # Try WMI first
+    $battery = Get-CimInstance Win32_Battery
+    if ($battery) {
+        $design = $battery.DesignCapacity
+        $full = $battery.FullChargeCapacity
+        $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
+        $installDate = $battery.InstallDate
+        $age = if ($installDate) { $ageDays = (Get-Date) - $installDate; "$($ageDays.Days) days" } else { "Unknown" }
+        return @{
+            Age = $age
+            DesignCapacity = "$design mWh"
+            MeasuredCapacity = "$full mWh"
+            Health = "$health%"
+        }
+    }
+    # Fallback to powercfg
     $tempFile = Join-Path $env:TEMP "battery_report.html"
     try {
         & powercfg /batteryreport /output $tempFile | Out-Null
@@ -100,19 +128,6 @@ function Get-BatteryInfo {
             }
         }
     } catch {
-        # Fallback to WMI
-        $battery = Get-CimInstance Win32_Battery
-        if ($battery) {
-            $design = $battery.DesignCapacity
-            $full = $battery.FullChargeCapacity
-            $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
-            return @{
-                Age = "Unknown"
-                DesignCapacity = "$design mWh"
-                MeasuredCapacity = "$full mWh"
-                Health = "$health%"
-            }
-        }
     } finally {
         if (Test-Path $tempFile) { Remove-Item $tempFile }
     }
@@ -124,13 +139,18 @@ function Get-SMARTData {
     param($deviceID)
     $smartctl = Join-Path $PSScriptRoot "smartctl.exe"
     if (-not (Test-Path $smartctl)) {
-        # Try to download smartctl.exe
+        # Download smartctl.exe
         try {
-            $url = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32-setup.exe"  # Example, but it's installer
-            # Actually, better to provide link, but for script, perhaps assume user downloads
-            return "smartctl.exe not found. Download from https://www.smartmontools.org/"
+            $zipUrl = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32.zip"
+            $zipPath = Join-Path $env:TEMP "smartmontools.zip"
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+            $extractPath = Join-Path $env:TEMP "smartmontools"
+            Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+            $sourceSmartctl = Join-Path $extractPath "bin\smartctl.exe"
+            Copy-Item $sourceSmartctl $smartctl
+            Remove-Item $zipPath, $extractPath -Recurse -Force
         } catch {
-            return "smartctl.exe not found"
+            return "Failed to download smartctl.exe"
         }
     }
     try {
@@ -299,5 +319,5 @@ $html = @"
 </html>
 "@
 
-Set-Content -Path $path -Value $html -Encoding UTF8
+[System.IO.File]::WriteAllText($path, $html, [System.Text.Encoding]::UTF8)
 Write-Host "Rapport généré à $path"
