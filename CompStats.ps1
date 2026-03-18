@@ -423,7 +423,10 @@ foreach ($hdd in $hdds) {
 
 # Generate HTML report
 $date = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$path = Join-Path $PSScriptRoot "$date.html"
+$safeModel = $system.Model -replace "[\\/:*?""<>|]", "_"
+$safeSerial = $system.SerialNumber -replace "[\\/:*?""<>|]", "_"
+$filename = "$($system.Brand)_${safeModel}_${safeSerial}_$date.html"
+$path = Join-Path $PSScriptRoot $filename
 
 # Prepare battery HTML
 if ($battery -is [hashtable]) {
