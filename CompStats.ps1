@@ -33,9 +33,19 @@ if (-not $isAdmin) {
 # Function to get system information
 function Get-SystemInfo {
     $cs = Get-CimInstance Win32_ComputerSystem
+    $bios = Get-CimInstance Win32_BIOS
+    
+    # Extract full BIOS date
+    $biosDate = "N/A"
+    if ($bios.ReleaseDate) {
+        $biosDate = $bios.ReleaseDate.ToString("dd/MM/yyyy")
+    }
+    
     return @{
         Brand = $cs.Manufacturer
         Model = $cs.Model
+        SerialNumber = $bios.SerialNumber
+        BiosDate = $biosDate
     }
 }
 
@@ -445,7 +455,7 @@ if ($battery -is [hashtable]) {
 }
 
 # Prepare health summary
-$summaryModel = $system.Model
+$summaryModel = "$($system.Model) ($($system.SerialNumber))"
 $summaryHDDs = ""
 $summaryBatteryHtml = ""
 $hddIndex = 1
@@ -571,6 +581,8 @@ $html = @"
             <table>
                 <tr><th>Marque</th><td>$($system.Brand)</td></tr>
                 <tr><th>Mod&egrave;le</th><td>$($system.Model)</td></tr>
+                <tr><th>Num&eacute;ro de s&eacute;rie</th><td>$($system.SerialNumber)</td></tr>
+                <tr><th>Derniere mise a jour BIOS</th><td>$($system.BiosDate)</td></tr>
             </table>
         </div>
 
