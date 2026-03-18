@@ -4,6 +4,28 @@
 # Generates an HTML report with system, CPU, RAM, HDD (with SMART), and Battery info
 
 param()
+
+# Check for elevated privileges (admin rights)
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host ""
+    Write-Host "======================================" -ForegroundColor Yellow
+    Write-Host "ATTENTION: Droits administrateur requis" -ForegroundColor Yellow
+    Write-Host "======================================" -ForegroundColor Yellow
+    Write-Host "smartctl necessite des privileges eleves pour fonctionner correctement." -ForegroundColor Yellow
+    Write-Host ""
+    $response = Read-Host "Voulez-vous redemarrer le script en mode administrateur? (O/N)"
+    if ($response -eq "O" -or $response -eq "o") {
+        Write-Host "Redemarrage en cours..." -ForegroundColor Green
+        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        exit
+    } else {
+        Write-Host "Le script continuera sans les donnees SMART complete." -ForegroundColor Yellow
+        Write-Host ""
+    }
+}
+
 # Force UTF-8 encoding for input and output
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
@@ -267,13 +289,20 @@ function Get-SMARTData {
     
     # Try smartctl with different device types
     if ($smartctlPath) {
-        $devicePath = "\\.\PHYSICALDRIVE$deviceID"
-        $deviceTypes = @('sat', 'ata', 'scsi', 'nvme')
+        # Map device ID to Linux device names
+        # PhysicalDrive0 = /dev/sda, PhysicalDrive1 = /dev/sdb
+        $linuxDevice = if ($deviceID -eq "0") { "/dev/sda" } elseif ($deviceID -eq "1") { "/dev/sdb" } else { "/dev/sda" }
+        
+        # Try sat for SATA drives, nvme for NVMe drives
+        $deviceTypes = if ($deviceID -eq "0") { @('sat', 'ata', 'scsi') } else { @('nvme', 'ata', 'sat') }
         
         foreach ($devType in $deviceTypes) {
             try {
-                $output = & $smartctlPath -d $devType -a $devicePath 2>$null
-                if ($output -match "Reallocated_Sector_Ct" -or $output -match "Power_On_Hours") {
+                $args = @("-d", $devType, "-a", $linuxDevice)
+                $output = & $smartctlPath @args 2>&1
+                
+                # Check if we got SMART data (including NVMe format)
+                if ($output -match "Reallocated_Sector_Ct" -or $output -match "Power_On_Hours" -or $output -match "Power-On_Hours" -or $output -match "Data Units Written" -or $output -match "Percentage Used") {
                     $smartAvailable = $true
                     
                     # Parse errors (reallocated sectors)
@@ -284,20 +313,48 @@ function Get-SMARTData {
                         if ($errLine -match "(\d+)") { $errors = $matches[1] }
                     }
                     
-                    # Parse power-on hours
+                    # Parse power-on hours (ATA format)
                     $hours = "N/A"
                     $hoursMatch = $output | Select-String "Power_On_Hours"
+                    if (-not $hoursMatch) { $hoursMatch = $output | Select-String "Power-On_Hours" }
                     if ($hoursMatch) {
                         $hoursLine = $hoursMatch.Line
                         if ($hoursLine -match "(\d+)") { $hours = $matches[1] }
                     }
                     
-                    # Parse temperature
+                    # Parse temperature - look for Current Temperature
                     $temp = "N/A"
-                    $tempMatch = $output | Select-String "Temperature_Celsius"
+                    $tempMatch = $output | Select-String "Current Temperature"
+                    if (-not $tempMatch) { $tempMatch = $output | Select-String "Temperature_Celsius" }
                     if ($tempMatch) {
                         $tempLine = $tempMatch.Line
-                        if ($tempLine -match "(\d+)") { $temp = $matches[1] }
+                        # Try to find a number in the line
+                        if ($tempLine -match "(\d+)") { 
+                            $tempVal = [int]$matches[1]
+                            # Reasonable temperature check (0-100 C)
+                            if ($tempVal -gt 0 -and $tempVal -lt 100) {
+                                $temp = $tempVal
+                            }
+                        }
+                    }
+                    
+                    # Parse wear level for SSDs
+                    $wearLevel = "N/A"
+                    $wearMatch = $output | Select-String "Percent_Lifetime_Remain"
+                    if (-not $wearMatch) { $wearMatch = $output | Select-String "Wear_Leveling_Count" }
+                    if (-not $wearMatch) { $wearMatch = $output | Select-String "Percentage Used" }
+                    if ($wearMatch) {
+                        $wearLine = $wearMatch.Line
+                        if ($wearLine -match "(\d+)") { 
+                            $wearVal = [int]$matches[1]
+                            # For Percentage Used, lower is better (100% = new, 0% = worn)
+                            # For Percent_Lifetime_Remain, higher is better
+                            if ($wearLine -match "Percentage Used") {
+                                $wearLevel = "$wearVal% used"
+                            } else {
+                                $wearLevel = "$wearVal% remaining"
+                            }
+                        }
                     }
                     
                     $smartData = @{
@@ -305,8 +362,8 @@ function Get-SMARTData {
                         Hours = $hours
                         Temp = $temp
                         Source = "smartctl"
+                        WearLevel = $wearLevel
                     }
-                    break
                 }
             } catch { }
         }
@@ -387,6 +444,50 @@ if ($battery -is [hashtable]) {
     $batteryHtml = "<p>$battery</p>"
 }
 
+# Prepare health summary
+$summaryModel = $system.Model
+$summaryHDDs = ""
+$summaryBatteryHtml = ""
+$hddIndex = 1
+foreach ($hdd in $hdds) {
+    $smart = $hdd.SMART
+    $hddStatus = "OK"
+    $hddClass = "health-good"
+    $capacity = $hdd.Size -replace " GB$", ""
+    $capacity = [math]::Floor([double]$capacity)
+    
+    if ($smart -is [hashtable]) {
+        if ($smart.Errors -and $smart.Errors -ne "N/A" -and $smart.Errors -ne "0") {
+            $hddStatus = "KO"
+            $hddClass = "health-bad"
+        } elseif ($smart.Temp -and $smart.Temp -ne "N/A" -and [int]$smart.Temp -gt 50) {
+            $hddStatus = "KO"
+            $hddClass = "health-bad"
+        } elseif ($smart.Health -and $smart.Health -eq "Warning") {
+            $hddStatus = "Attention"
+            $hddClass = "health-warning"
+        }
+    }
+    if ($hddIndex -gt 1) { $summaryHDDs += " | " }
+    $statusBadge = if ($hddStatus -eq "OK") { "status-ok" } elseif ($hddStatus -eq "Attention") { "status-warning" } else { "status-bad" }
+    $summaryHDDs += "HDD $hddIndex ${capacity}GB : <span class='status-badge $statusBadge'>$hddStatus</span>"
+    $hddIndex++
+}
+
+# Battery summary with color
+if ($battery -is [hashtable]) {
+    $batHealth = $battery.Health
+    $batBadge = "status-ok"
+    if ($batHealth -match '(\d+)') {
+        $h = [int]$matches[1]
+        if ($h -lt 60) { $batBadge = "status-bad" }
+        elseif ($h -lt 80) { $batBadge = "status-warning" }
+    }
+    $summaryBattery = "<span class='status-badge $batBadge'>$batHealth</span> ($($battery.BatteryLifeFull))"
+} else {
+    $summaryBattery = "N/A"
+}
+
 # HTML content with embedded Chart.js for simple charts
 $html = @"
 <!DOCTYPE html>
@@ -407,12 +508,63 @@ $html = @"
         .health-good { color: green; }
         .health-warning { color: orange; }
         .health-bad { color: red; }
+        .summary-card { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .summary-card h2 { 
+            border: none; 
+            color: white; 
+            margin-top: 0;
+            font-size: 1.2em;
+        }
+        .summary-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .summary-item {
+            background: rgba(255,255,255,0.2);
+            padding: 10px 15px;
+            border-radius: 5px;
+            flex: 1;
+            min-width: 150px;
+        }
+        .summary-label { font-weight: bold; font-size: 0.9em; opacity: 0.9; }
+        .summary-value { font-size: 1.1em; margin-top: 5px; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9em; }
+        .status-ok { background: #27ae60; color: white; }
+        .status-warning { background: #f39c12; color: white; }
+        .status-bad { background: #e74c3c; color: white; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Statistiques Ordinateur pour Recyclage</h1>
         <p><strong>Date de génération:</strong> $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")</p>
+
+        <div class="summary-card">
+            <h2>Résumé deSanté</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-label">Modèle</div>
+                    <div class="summary-value">$summaryModel</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Disques</div>
+                    <div class="summary-value">$summaryHDDs</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Batterie</div>
+                    <div class="summary-value">$summaryBattery</div>
+                </div>
+            </div>
+        </div>
 
         <div class="section">
             <h2>Syst&egrave;me</h2>
@@ -501,10 +653,12 @@ $html = @"
                     $errorsDisplay = if ($smart.Errors -ne "N/A") { $smart.Errors } else { "Not available" }
                     $hoursDisplay = if ($smart.Hours -ne "N/A") { "$($smart.Hours) hours" } else { "Not available" }
                     $tempDisplay = if ($smart.Temp -ne "N/A") { "$($smart.Temp) C" } else { "Not available" }
+                    $wearDisplay = if ($smart.WearLevel -ne "N/A") { $smart.WearLevel } else { "Not available" }
                     
                     "<tr><th>Secteurs realloues</th><td class='$healthClass'>$errorsDisplay</td></tr>"
                     "<tr><th>Heures utilisation</th><td>$hoursDisplay</td></tr>"
                     "<tr><th>Temperature</th><td class='$healthClass'>$tempDisplay</td></tr>"
+                    "<tr><th>Niveau d'usure</th><td>$wearDisplay</td></tr>"
                     
                     # Health status row
                     $sourceInfo = if ($smart.Source) { " (via $($smart.Source))" } else { "" }
