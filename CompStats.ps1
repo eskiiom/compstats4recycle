@@ -78,36 +78,131 @@ function Get-HDDInfo {
 # Function to get battery information using powercfg
 function Get-BatteryInfo {
     $tempFile = Join-Path $env:TEMP "battery_report.html"
-    $existingFile = Join-Path $PSScriptRoot "battery-report.html"
-    if (Test-Path $existingFile) {
-        $content = Get-Content $existingFile -Raw
-    } else {
+    $scriptDirFile = Join-Path $PSScriptRoot "battery-report.html"
+    $rootFile = "C:\battery-report.html"
+    $content = $null
+    
+    # Check if file exists in script directory
+    if (Test-Path $scriptDirFile) {
+        $fileAge = (Get-Date) - (Get-Item $scriptDirFile).LastWriteTime
+        if ($fileAge.TotalDays -lt 1) {
+            # File exists and is less than 1 day old - use it
+            Write-Host "Utilisation du rapport de batterie existant: $scriptDirFile"
+            $content = Get-Content $scriptDirFile -Raw
+        } else {
+            Write-Host "Rapport de batterie trop ancien, generation d'un nouveau..."
+        }
+    }
+    
+    # Check if file exists in C:\
+    if (-not $content -and (Test-Path $rootFile)) {
+        $fileAge = (Get-Date) - (Get-Item $rootFile).LastWriteTime
+        if ($fileAge.TotalDays -lt 1) {
+            Write-Host "Utilisation du rapport de batterie: $rootFile"
+            $content = Get-Content $rootFile -Raw
+            # Copy to script directory for future use
+            Copy-Item $rootFile $scriptDirFile -Force
+        }
+    }
+    
+    # Generate new report if needed
+    if (-not $content) {
         try {
+            Write-Host "Generation d'un nouveau rapport de batterie..."
+            # Generate to temp first, then move to script directory
             & powercfg /batteryreport /output $tempFile | Out-Null
             if (Test-Path $tempFile) {
-                $content = Get-Content $tempFile -Raw
+                # Copy to script directory
+                Copy-Item $tempFile $scriptDirFile -Force
+                $content = Get-Content $scriptDirFile -Raw
+                Write-Host "Rapport de batterie genere: $scriptDirFile"
             } else {
                 return "No battery detected"
             }
         } catch {
+            Write-Host "Erreur lors de la generation du rapport: $($_.Exception.Message)"
             return "No battery detected"
         } finally {
-            if (Test-Path $tempFile) { Remove-Item $tempFile }
+            if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
         }
     }
-    # Parse HTML for battery info
-    if ($content -match '<span id="DesignCapacity">(.*?)</span>') { $designMatch = $matches[1] }
-    if ($content -match '<span id="FullChargeCapacity">(.*?)</span>') { $fullMatch = $matches[1] }
-    if ($content -match '<span id="CycleCount">(.*?)</span>') { $cycleMatch = $matches[1] }
+    
+    # Check if content is XML and convert to HTML if needed
+    if ($content -match '^<\?xml') {
+        # It's XML format - need to regenerate in HTML format
+        Write-Host "Rapport au format XML detecté, regeneration en HTML..."
+        try {
+            & powercfg /batteryreport /output $tempFile | Out-Null
+            if (Test-Path $tempFile) {
+                Copy-Item $tempFile $scriptDirFile -Force
+                $content = Get-Content $scriptDirFile -Raw
+            }
+        } catch {
+            Write-Host "Erreur conversion: $($_.Exception.Message)"
+        } finally {
+            if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    # Parse HTML for battery info - improved patterns for Windows battery report
+    # Format: <span class="label">DESIGN CAPACITY</span></td><td>45 730 mWh</td>
+    
+    # Initialize variables
+    $batteryName = $null
+    $manufacturer = $null
+    $serialNumber = $null
+    $chemistry = $null
+    $designMatch = $null
+    $fullMatch = $null
+    $cycleMatch = $null
+    
+    # Extract battery info
+    if ($content -match '<span class="label">DESIGN CAPACITY</span></td><td>(\d[\d\s]*)mWh') { 
+        $designMatch = $matches[1] -replace '\s', '' 
+    }
+    if ($content -match '<span class="label">FULL CHARGE CAPACITY</span></td><td>(\d[\d\s]*)mWh') { 
+        $fullMatch = $matches[1] -replace '\s', '' 
+    }
+    if ($content -match '<span class="label">CYCLE COUNT</span></td><td>(\d+)') { 
+        $cycleMatch = $matches[1] 
+    }
+    
+    # Also extract battery name and manufacturer
+    if ($content -match '<span class="label">NAME</span></td><td>([^<]+)') { $batteryName = $matches[1].Trim() }
+    if ($content -match '<span class="label">MANUFACTURER</span></td><td>([^<]+)') { $manufacturer = $matches[1].Trim() }
+    if ($content -match '<span class="label">SERIAL NUMBER</span></td><td>([^<]+)') { $serialNumber = $matches[1].Trim() }
+    if ($content -match '<span class="label">CHEMISTRY</span></td><td>([^<]+)') { $chemistry = $matches[1].Trim() }
+    
+    # Extract battery life estimation
+    # Format: <td>Since OS install</td><td class="hms">5:49:46</td>...<td class="hms">7:19:48</td>
+    $batteryLifeFull = $null
+    $batteryLifeDesign = $null
+    
+    # Use pattern with class="hms" to be more specific
+    if ($content -match '(?s)Since OS install.*?<td class="hms">(\d+:\d+:\d+)</td>.*?<td class="hms">(\d+:\d+:\d+)') {
+        $batteryLifeFull = $matches[1]
+        $batteryLifeDesign = $matches[2]
+    }
     if ($designMatch -and $fullMatch) {
         $design = [int]($designMatch -replace '[^0-9]', '')
         $full = [int]($fullMatch -replace '[^0-9]', '')
         $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
+        
+        # Determine health status
+        $healthStatus = if ($health -ge 80) { "Excellent" } elseif ($health -ge 60) { "Bon" } elseif ($health -ge 40) { "Attention" } else { "Critique" }
+        
         return @{
-            Age = if ($cycleMatch) { "$cycleMatch cycles" } else { "Unknown" }
-            DesignCapacity = "$design mWh"
-            MeasuredCapacity = "$full mWh"
+            Name = if ($batteryName) { $batteryName } else { "Non detecte" }
+            Manufacturer = if ($manufacturer) { $manufacturer } else { "Non detecte" }
+            SerialNumber = if ($serialNumber) { $serialNumber } else { "Non detecte" }
+            Chemistry = if ($chemistry) { $chemistry } else { "Non detecte" }
+            Age = if ($cycleMatch) { "$cycleMatch cycles" } else { "Inconnu" }
+            DesignCapacity = if ($design -gt 0) { "$design mWh" } else { "Non detectee" }
+            MeasuredCapacity = if ($full -gt 0) { "$full mWh" } else { "Non mesuree" }
             Health = "$health%"
+            HealthStatus = $healthStatus
+            HealthValue = $health
+            BatteryLifeFull = if ($batteryLifeFull) { $batteryLifeFull } else { "Non disponible" }
+            BatteryLifeDesign = if ($batteryLifeDesign) { $batteryLifeDesign } else { "Non disponible" }
         }
     }
     return "No battery detected"
@@ -117,34 +212,43 @@ function Get-BatteryInfo {
 function Get-SMARTData {
     param($deviceID)
     $smartctlPath = $null
+    
+    # Enable TLS 1.2 for secure downloads
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+    
     # Check if smartctl is in script directory
     $smartctl = Join-Path $PSScriptRoot "smartctl.exe"
     if (Test-Path $smartctl) {
         $smartctlPath = $smartctl
     } else {
-        # Check default installation path
-        $defaultPath = "C:\Program Files\smartmontools\bin\smartctl.exe"
-        if (Test-Path $defaultPath) {
-            $smartctlPath = $defaultPath
-        } else {
-            # Check if installed in PATH
+        # Check multiple installation paths (32-bit and 64-bit)
+        $possiblePaths = @(
+            "C:\Program Files\smartmontools\bin\smartctl.exe",
+            "C:\Program Files (x86)\smartmontools\bin\smartctl.exe"
+        )
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) { $smartctlPath = $path; break }
+        }
+        
+        if (-not $smartctlPath) {
             try {
                 $cmd = Get-Command smartctl -ErrorAction Stop
                 $smartctlPath = $cmd.Source
             } catch {
-                # Download smartctl.exe
                 try {
                     $zipUrl = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32.zip"
                     $zipPath = Join-Path $env:TEMP "smartmontools.zip"
-                    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+                    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
+                    if ((Get-Item $zipPath).Length -lt 1000000) { throw "File too small" }
                     $extractPath = Join-Path $env:TEMP "smartmontools"
                     Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
                     $sourceSmartctl = Join-Path $extractPath "bin\smartctl.exe"
-                    Copy-Item $sourceSmartctl $smartctl
+                    Copy-Item $sourceSmartctl $smartctl -Force
                     $smartctlPath = $smartctl
-                    Remove-Item $zipPath, $extractPath -Recurse -Force
+                    Remove-Item $zipPath, $extractPath -Recurse -Force -ErrorAction SilentlyContinue
                 } catch {
-                    return "smartctl.exe not found"
+                    Write-Warning "Echec telechargement smartctl: $($_.Exception.Message)"
+                    return "smartctl.exe non trouve et telechargement echoue"
                 }
             }
         }
@@ -184,47 +288,26 @@ $path = Join-Path $PSScriptRoot "$date.html"
 if ($battery -is [hashtable]) {
     $healthValue = $battery.Health
     $healthClass = ""
-    $chartScript = ""
+    
+    # Determine health class
     if ($healthValue -match '^\d') {
         $h = [double]$healthValue.Trim('%')
-        $healthClass = if ($h -gt 80) { "health-good" } elseif ($h -gt 50) { "health-warning" } else { "health-bad" }
-        $chartScript = @"
-            <div class="chart-container">
-                <canvas id="batteryChart"></canvas>
-            </div>
-            <script>
-                var ctx = document.getElementById('batteryChart').getContext('2d');
-                var batteryHealth = $h;
-                var batteryData = {
-                    labels: ['Santé', 'Perte'],
-                    datasets: [{
-                        data: [batteryHealth, 100 - batteryHealth],
-                        backgroundColor: ['#4CAF50', '#F44336'],
-                        borderWidth: 1
-                    }]
-                };
-                var batteryChart = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: batteryData,
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            legend: { position: 'bottom' },
-                            title: { display: true, text: '&Eacute;tat de Sant&eacute; de la Batterie' }
-                        }
-                    }
-                });
-            </script>
-"@
+        $healthClass = if ($h -ge 80) { "health-good" } elseif ($h -ge 60) { "health-warning" } else { "health-bad" }
     }
+    
     $batteryHtml = @"
             <table>
+                <tr><th>Nom de la batterie</th><td>$($battery.Name)</td></tr>
+                <tr><th>Fabricant</th><td>$($battery.Manufacturer)</td></tr>
+                <tr><th>Numéro de série</th><td>$($battery.SerialNumber)</td></tr>
+                <tr><th>Chimie</th><td>$($battery.Chemistry)</td></tr>
                 <tr><th>Age approximatif</th><td>$($battery.Age)</td></tr>
-                <tr><th>Capacit&eacute; constructeur</th><td>$($battery.DesignCapacity)</td></tr>
-                <tr><th>Capacit&eacute; mesur&eacute;e</th><td>$($battery.MeasuredCapacity)</td></tr>
-                <tr><th>&Eacute;tat de sant&eacute;</th><td class='$healthClass'>$healthValue</td></tr>
+                <tr><th>Capacité constructeur</th><td>$($battery.DesignCapacity)</td></tr>
+                <tr><th>Capacité mesurée</th><td>$($battery.MeasuredCapacity)</td></tr>
+                <tr><th>État de santé</th><td class='$healthClass'>$($battery.Health) ($($battery.HealthStatus))</td></tr>
+                <tr><th>Autonomie estimée (charge complète)</th><td>$($battery.BatteryLifeFull)</td></tr>
+                <tr><th>Autonomie estimée (capacité d'origine)</th><td>$($battery.BatteryLifeDesign)</td></tr>
             </table>
-            $chartScript
 "@
 } else {
     $batteryHtml = "<p>$battery</p>"
@@ -237,7 +320,6 @@ $html = @"
 <head>
     <meta charset="UTF-8">
     <title>CompStats for Recycle</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
         .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
@@ -248,7 +330,6 @@ $html = @"
         th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
         th { background-color: #f8f9fa; font-weight: bold; }
         tr:nth-child(even) { background-color: #f8f9fa; }
-        .chart-container { width: 50%; margin: 20px auto; }
         .health-good { color: green; }
         .health-warning { color: orange; }
         .health-bad { color: red; }

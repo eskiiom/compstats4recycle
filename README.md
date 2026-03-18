@@ -1,34 +1,108 @@
 # CompStats for Recycle
 
-Un script PowerShell pour générer des statistiques matérielles sur les ordinateurs utilisés avant recyclage.
+Un script PowerShell amélioré pour générer des statistiques matérielles détaillées sur les ordinateurs utilisés avant recyclage.
 
-## Fonctionnalités
+## ✨ Nouvelles fonctionnalités (Version améliorée)
+
+### 🔧 Corrections et améliorations
+- **RAM intégrée/soudée** : Meilleure détection et affichage pour les systèmes avec RAM non modulaire
+- **Données SMART étendues** : Récupération complète des informations de santé des disques (secteurs alloués, en attente, erreurs hors ligne)
+- **Rapport de batterie amélioré** : Meilleure lecture des fichiers battery-report.html et informations supplémentaires
+- **Année de fabrication** : Extraction automatique de l'année depuis les informations BIOS
+- **Résumé exécutif** : Aperçu rapide de l'état général avec alertes visuelles
+
+### 📊 Rapport HTML amélioré
+- **Mise en forme moderne** : Styles CSS améliorés avec couleurs d'état
+- **Graphiques interactifs** : Graphique en secteurs pour l'état de la batterie
+- **Alertes visuelles** : Boîtes d'avertissement pour problèmes critiques
+- **Informations détaillées** : Plus de données SMART et meilleures descriptions
+
+## Fonctionnalités complètes
 
 Le script collecte et génère un rapport HTML avec les informations suivantes :
 
-- **Système** : Marque, modèle, année de fabrication approximative
-- **CPU** : Marque, modèle, vitesse maximale
-- **RAM** : Total, détails par module (marque, modèle, capacité)
-- **Disques** : Type (SSD/HDD), taille, données SMART (erreurs détectées, secteurs défaillants, heures d'utilisation, température actuelle)
-- **Batterie** : Age approximatif, capacité constructeur, capacité mesurée, état de santé (avec graphique)
+### 🖥️ Système
+- Marque et modèle
+- **Année de fabrication** (extraction BIOS)
+- Nom de l'ordinateur
 
-Le rapport HTML est moderne, lisible et inclut des graphiques (état de santé de la batterie).
+### ⚡ CPU
+- Marque et modèle
+- Vitesse maximale
+
+### 💾 RAM
+- **Total avec détection intelligente**
+- **Support RAM intégrée/soudée**
+- Détails par module : statut, marque, modèle, capacité, **vitesse**
+
+### 💿 Disques (SSD/HDD)
+- Type et taille
+- **Informations détaillées** : modèle, numéro de série, firmware
+- **Données SMART complètes** :
+  - Secteurs réalloués
+  - Secteurs en attente
+  - Erreurs hors ligne
+  - Heures d'utilisation
+  - Température actuelle
+  - **Vitesse de rotation** (HDD) ou type SSD
+  - **Score de santé global**
+
+### 🔋 Batterie
+- Nom de la batterie
+- Age approximatif (cycles)
+- Capacité constructeur vs mesurée
+- **État de santé avec classification** (Excellent/Bon/Attention/Critique)
+- **Graphique interactif** de l'état de santé
+
+### 📈 Résumé exécutif
+- **Analyse automatique** des problèmes critiques
+- **Alertes visuelles** pour batteries faibles ou disques défaillants
+- **Recommandations** pour le recyclage
 
 ## Utilisation
 
-1. Téléchargez le script `CompStats.ps1`.
-2. Le script télécharge automatiquement `smartctl.exe` depuis smartmontools.org si nécessaire. Si le téléchargement échoue, téléchargez manuellement depuis [smartmontools](https://www.smartmontools.org/) et placez `smartctl.exe` dans le dossier du script.
-3. Exécutez le script avec PowerShell :
-   ```
-   powershell.exe -ExecutionPolicy Bypass -File .\CompStats.ps1
-   ```
-4. Le rapport HTML sera généré dans le dossier du script avec un nom basé sur la date.
+### 🚀 Lancement rapide
+```powershell
+.\CompStats.ps1
+```
 
-## Indicateurs de Santé
+### 📋 Prérequis
+- Windows avec PowerShell 5.1+
+- **Optionnel** : smartctl.exe pour les données SMART (téléchargement automatique)
 
-- **Batterie** : Santé < 80% indique un remplacement recommandé.
-- **Disques** : Erreurs SMART > 0 ou température > 50°C signalent des problèmes potentiels.
-- **Températures** : CPU et HDD devraient être < 60°C en charge normale.
+### 📄 Fichiers générés
+- **Rapport principal** : `YYYY-MM-DD_HH-mm-ss.html` (ouverture directe dans navigateur)
+- **Rapport batterie** : `battery-report.html` (généré automatiquement si nécessaire)
+
+### 🔧 Configuration avancée
+- Le script génère automatiquement `smartctl.exe` si nécessaire
+- Copiez `battery-report.html` existant pour éviter la regeneration
+- Modifiez les seuils d'alerte dans le script si besoin
+
+## 📊 Indicateurs de Santé
+
+### 🔋 Batterie
+- **> 80%** : Excellent état ✅
+- **60-80%** : Bon état ⚠️
+- **40-60%** : Attention 🔶
+- **< 40%** : Critique ❌
+
+### 💿 Disques (SMART)
+- **0 erreur** : Bon état ✅
+- **1-9 erreurs** : Attention ⚠️
+- **≥ 10 erreurs** : Problématique ❌
+- **Température > 50°C** : Avertissement 🌡️
+
+### 🖥️ Températures système
+- **CPU/HDD < 50°C** : Normal ✅
+- **50-60°C** : Acceptable ⚠️
+- **> 60°C** : Élevé ❌
+
+### 🏷️ Classification recyclage
+Le rapport inclut un **résumé exécutif** qui classifie automatiquement :
+- **État satisfaisant** : Prêt pour réutilisation
+- **Avertissements** : Utilisation possible avec monitoring
+- **Problèmes critiques** : Recyclage recommandé
 
 ## Prérequis
 
