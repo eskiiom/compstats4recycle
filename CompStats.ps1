@@ -4,7 +4,9 @@
 # Generates an HTML report with system, CPU, RAM, HDD (with SMART), and Battery info
 
 param()
+# Force UTF-8 encoding for input and output
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
 
 # Function to get system information
 function Get-SystemInfo {
@@ -28,20 +30,40 @@ function Get-CPUInfo {
 # Function to get RAM information
 function Get-RAMInfo {
     $rams = Get-CimInstance Win32_PhysicalMemory
+    
+    # Handle single object vs collection
+    if ($rams -is [array]) {
+        $ramCount = $rams.Count
+    } else {
+        $ramCount = 1
+    }
+    
     $total = ($rams | Measure-Object -Property Capacity -Sum).Sum / 1GB
+    
+    # Try to get memory device slots - use a more reliable method
     $array = Get-CimInstance Win32_PhysicalMemoryArray
-    $maxSlots = $array.MemoryDevices
-    $occupiedSlots = $rams.Count
+    if ($array -and $array.MemoryDevices) {
+        $maxSlots = $array.MemoryDevices
+    } else {
+        # Fallback: assume at least as many slots as modules or 2
+        $maxSlots = [Math]::Max($ramCount, 2)
+    }
+    
     $details = @()
     for ($i = 0; $i -lt $maxSlots; $i++) {
-        if ($i -lt $occupiedSlots) {
-            $ram = $rams[$i]
+        if ($i -lt $ramCount) {
+            # Handle array or single object
+            if ($ramCount -eq 1 -and $i -eq 0) {
+                $ram = $rams
+            } else {
+                $ram = $rams[$i]
+            }
             $details += @{
                 Slot = "Slot $($i+1)"
                 Manufacturer = $ram.Manufacturer
                 Model = $ram.PartNumber
                 Capacity = "$([math]::Round($ram.Capacity / 1GB, 2)) GB"
-                Status = "Occupé"
+                Status = "Occupe"
             }
         } else {
             $details += @{
@@ -208,7 +230,7 @@ function Get-BatteryInfo {
     return "No battery detected"
 }
 
-# Function to get SMART data using smartctl.exe
+# Function to get SMART data using smartctl.exe or WMI fallback
 function Get-SMARTData {
     param($deviceID)
     $smartctlPath = $null
@@ -235,37 +257,89 @@ function Get-SMARTData {
                 $cmd = Get-Command smartctl -ErrorAction Stop
                 $smartctlPath = $cmd.Source
             } catch {
-                try {
-                    $zipUrl = "https://www.smartmontools.org/files/smartmontools-7.4-1.win32.zip"
-                    $zipPath = Join-Path $env:TEMP "smartmontools.zip"
-                    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
-                    if ((Get-Item $zipPath).Length -lt 1000000) { throw "File too small" }
-                    $extractPath = Join-Path $env:TEMP "smartmontools"
-                    Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
-                    $sourceSmartctl = Join-Path $extractPath "bin\smartctl.exe"
-                    Copy-Item $sourceSmartctl $smartctl -Force
-                    $smartctlPath = $smartctl
-                    Remove-Item $zipPath, $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-                } catch {
-                    Write-Warning "Echec telechargement smartctl: $($_.Exception.Message)"
-                    return "smartctl.exe non trouve et telechargement echoue"
-                }
+                Write-Host "smartctl not found, using WMI fallback"
             }
         }
     }
-    try {
-        $output = & $smartctlPath -a "\\.\PHYSICALDRIVE$deviceID" 2>$null
-        $errors = ($output | Select-String "Reallocated_Sector_Ct" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
-        $hours = ($output | Select-String "Power_On_Hours" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
-        $temp = ($output | Select-String "Temperature_Celsius" | ForEach-Object { ($_.Line -split '\s+')[-1] }) -join ""
-        return @{
-            Errors = $errors
-            Hours = $hours
-            Temp = $temp
+    
+    $smartData = $null
+    $smartAvailable = $false
+    
+    # Try smartctl with different device types
+    if ($smartctlPath) {
+        $devicePath = "\\.\PHYSICALDRIVE$deviceID"
+        $deviceTypes = @('sat', 'ata', 'scsi', 'nvme')
+        
+        foreach ($devType in $deviceTypes) {
+            try {
+                $output = & $smartctlPath -d $devType -a $devicePath 2>$null
+                if ($output -match "Reallocated_Sector_Ct" -or $output -match "Power_On_Hours") {
+                    $smartAvailable = $true
+                    
+                    # Parse errors (reallocated sectors)
+                    $errors = "0"
+                    $errMatch = $output | Select-String "Reallocated_Sector_Ct"
+                    if ($errMatch) {
+                        $errLine = $errMatch.Line
+                        if ($errLine -match "(\d+)") { $errors = $matches[1] }
+                    }
+                    
+                    # Parse power-on hours
+                    $hours = "N/A"
+                    $hoursMatch = $output | Select-String "Power_On_Hours"
+                    if ($hoursMatch) {
+                        $hoursLine = $hoursMatch.Line
+                        if ($hoursLine -match "(\d+)") { $hours = $matches[1] }
+                    }
+                    
+                    # Parse temperature
+                    $temp = "N/A"
+                    $tempMatch = $output | Select-String "Temperature_Celsius"
+                    if ($tempMatch) {
+                        $tempLine = $tempMatch.Line
+                        if ($tempLine -match "(\d+)") { $temp = $matches[1] }
+                    }
+                    
+                    $smartData = @{
+                        Errors = $errors
+                        Hours = $hours
+                        Temp = $temp
+                        Source = "smartctl"
+                    }
+                    break
+                }
+            } catch { }
         }
-    } catch {
-        return "Error reading SMART data"
     }
+    
+    # Fallback to WMI if smartctl failed
+    if (-not $smartAvailable) {
+        try {
+            $wmiDisk = Get-WmiObject -Class Win32_DiskDrive | Where-Object { $_.DeviceID -match "PHYSICALDRIVE$deviceID" }
+            if ($wmiDisk) {
+                $model = $wmiDisk.Model
+                $serial = $wmiDisk.SerialNumber
+                $status = $wmiDisk.Status
+                $firmware = $wmiDisk.FirmwareRevision
+                
+                $smartData = @{
+                    Errors = "N/A"
+                    Hours = "N/A"
+                    Temp = "N/A"
+                    Source = "WMI"
+                    Model = $model
+                    Serial = $serial
+                    Status = $status
+                    Firmware = $firmware
+                    Health = if ($status -eq "OK") { "OK" } else { $status }
+                }
+            }
+        } catch {
+            return "Unable to read SMART data"
+        }
+    }
+    
+    return $smartData
 }
 
 # Main script execution
@@ -370,15 +444,75 @@ $html = @"
             <h2>Disques Durs</h2>
             $($hdds | ForEach-Object {
                 $smart = $_.SMART
-                $healthClass = if ($smart.Errors -and [int]$smart.Errors -gt 0) { "health-bad" } elseif ($smart.Temp -and [int]$smart.Temp -gt 50) { "health-warning" } else { "health-good" }
+                
+                # Determine health class based on available data
+                $healthClass = "health-good"
+                $healthStatus = "OK"
+                $alertMessage = ""
+                
+                if ($smart -is [hashtable]) {
+                    # Check for SMART data errors
+                    $errorsVal = 0
+                    if ($smart.Errors -and $smart.Errors -ne "N/A" -and [int]::TryParse($smart.Errors, [ref]$errorsVal) -and $errorsVal -gt 0) {
+                        $healthClass = "health-bad"
+                        $healthStatus = "Problem detected"
+                        $alertMessage = "Reallocated sectors detected"
+                    }
+                    # Check temperature
+                    elseif ($smart.Temp -and $smart.Temp -ne "N/A") {
+                        $tempVal = 0
+                        if ([int]::TryParse($smart.Temp, [ref]$tempVal) -and $tempVal -gt 50) {
+                            $healthClass = "health-warning"
+                            $healthStatus = "High temperature"
+                            $alertMessage = "Temperature > 50C"
+                        }
+                    }
+                    # Check WMI health status
+                    elseif ($smart.Health -and $smart.Health -ne "Unknown") {
+                        if ($smart.Health -eq "Warning") {
+                            $healthClass = "health-warning"
+                            $healthStatus = "Warning"
+                        }
+                    }
+                    # Check disk status from WMI
+                    elseif ($smart.Status -and $smart.Status -ne "OK") {
+                        $healthClass = "health-warning"
+                        $healthStatus = $smart.Status
+                    }
+                }
+                
                 "<div style='margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; border-radius: 5px;'>"
                 "<table>"
                 "<tr><th>Type</th><td>$($_.Type)</td></tr>"
                 "<tr><th>Taille</th><td>$($_.Size)</td></tr>"
                 if ($smart -is [hashtable]) {
-                    "<tr><th>Erreurs d&eacute;tect&eacute;es (secteurs r&eacute;allou&eacute;s)</th><td class='$healthClass'>$($smart.Errors)</td></tr>"
-                    "<tr><th>Nombre d'heures d'utilisation</th><td>$($smart.Hours)</td></tr>"
-                    "<tr><th>Temp&eacute;rature actuelle</th><td class='$healthClass'>$($smart.Temp) &deg;C</td></tr>"
+                    # Add model and serial if available
+                    if ($smart.Model) {
+                        "<tr><th>Modele</th><td>$($smart.Model)</td></tr>"
+                    }
+                    if ($smart.Serial -and $smart.Serial -ne "N/A") {
+                        "<tr><th>Numero de serie</th><td>$($smart.Serial)</td></tr>"
+                    }
+                    if ($smart.Firmware) {
+                        "<tr><th>Firmware</th><td>$($smart.Firmware)</td></tr>"
+                    }
+                    
+                    # SMART data with proper display
+                    $errorsDisplay = if ($smart.Errors -ne "N/A") { $smart.Errors } else { "Not available" }
+                    $hoursDisplay = if ($smart.Hours -ne "N/A") { "$($smart.Hours) hours" } else { "Not available" }
+                    $tempDisplay = if ($smart.Temp -ne "N/A") { "$($smart.Temp) C" } else { "Not available" }
+                    
+                    "<tr><th>Secteurs realloues</th><td class='$healthClass'>$errorsDisplay</td></tr>"
+                    "<tr><th>Heures utilisation</th><td>$hoursDisplay</td></tr>"
+                    "<tr><th>Temperature</th><td class='$healthClass'>$tempDisplay</td></tr>"
+                    
+                    # Health status row
+                    $sourceInfo = if ($smart.Source) { " (via $($smart.Source))" } else { "" }
+                    "<tr><th>Etat de sante</th><td class='$healthClass'><strong>$healthStatus</strong>$sourceInfo</td></tr>"
+                    
+                    if ($alertMessage) {
+                        "<tr><th>Alerte</th><td class='health-bad'>$alertMessage</td></tr>"
+                    }
                 } else {
                     "<tr><th>SMART</th><td>$smart</td></tr>"
                 }
@@ -406,5 +540,8 @@ $html = @"
 </html>
 "@
 
-[System.IO.File]::WriteAllText($path, $html, [System.Text.Encoding]::UTF8)
-Write-Host "Rapport généré à $path"
+# Add UTF-8 BOM for proper encoding
+$utf8Bom = [System.Text.Encoding]::UTF8.GetPreamble()
+$htmlBytes = $utf8Bom + [System.Text.Encoding]::UTF8.GetBytes($html)
+[System.IO.File]::WriteAllBytes($path, $htmlBytes)
+Write-Host "Rapport genere a $path"
