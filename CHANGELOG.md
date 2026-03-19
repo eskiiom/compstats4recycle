@@ -2,6 +2,22 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.0.0] - 2026-03-16
+
+### ✨ Ajouté
+- **Version 1.0** : Publication de la version stable
+- **Informations de version** : Header du script avec copyright et lien GitHub
+- **Nom de fichier avec version** : Format `Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.0.html`
+- **Footer HTML** : Copyright et lien vers le projet dans le rapport généré
+- **Affichage console** : Information de version au lancement du script
+
+### 🔧 Modifié
+- **smartctl Windows** : Support amélioré pour format /dev/sdX
+- **BIOS** : Ajout du numéro de série et date BIOS
+- **SSD** : Détection du niveau d'usure (Wear Level)
+
+---
+
 ## [Version Améliorée] - 2025-12-07
 
 ### ✨ Ajouté

@@ -8,12 +8,11 @@ Un script PowerShell amélioré pour générer des statistiques matérielles dé
 - **RAM intégrée/soudée** : Meilleure détection et affichage pour les systèmes avec RAM non modulaire
 - **Données SMART étendues** : Récupération complète des informations de santé des disques (secteurs alloués, en attente, erreurs hors ligne)
 - **Rapport de batterie amélioré** : Meilleure lecture des fichiers battery-report.html et informations supplémentaires
-- **Année de fabrication** : Extraction automatique de l'année depuis les informations BIOS
+- **Date de famise a jour du BIOS** : Extraction automatique de la date depuis les informations BIOS
 - **Résumé exécutif** : Aperçu rapide de l'état général avec alertes visuelles
 
 ### 📊 Rapport HTML amélioré
 - **Mise en forme moderne** : Styles CSS améliorés avec couleurs d'état
-- **Graphiques interactifs** : Graphique en secteurs pour l'état de la batterie
 - **Alertes visuelles** : Boîtes d'avertissement pour problèmes critiques
 - **Informations détaillées** : Plus de données SMART et meilleures descriptions
 
@@ -23,8 +22,9 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 
 ### 🖥️ Système
 - Marque et modèle
-- **Année de fabrication** (extraction BIOS)
-- Nom de l'ordinateur
+- **Date de mise a jour du BIOS** (extraction BIOS)
+- **Numéro de série**
+- **Date BIOS**
 
 ### ⚡ CPU
 - Marque et modèle
@@ -46,6 +46,7 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
   - Température actuelle
   - **Vitesse de rotation** (HDD) ou type SSD
   - **Score de santé global**
+  - **Niveau d'usure SSD** (24% used, etc.)
 
 ### 🔋 Batterie
 - Nom de la batterie
@@ -71,7 +72,7 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **Optionnel** : smartctl.exe pour les données SMART (téléchargement automatique)
 
 ### 📄 Fichiers générés
-- **Rapport principal** : `YYYY-MM-DD_HH-mm-ss.html` (ouverture directe dans navigateur)
+- **Rapport principal** : `Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.0.html` (nommage automatique avec identifiant unique)
 - **Rapport batterie** : `battery-report.html` (généré automatiquement si nécessaire)
 
 ### 🔧 Configuration avancée
@@ -112,4 +113,12 @@ Le rapport inclut un **résumé exécutif** qui classifie automatiquement :
 
 ## Licence
 
+Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
+
+Ce script fait partie du projet [CompStats for Recycle](https://github.com/eskiiom/compstats4recycle).
+
 Libre d'utilisation pour le recyclage d'ordinateurs.
+
+---
+
+*Version 1.0 - Dernière modification : 2026-03-16*

@@ -1,9 +1,16 @@
 #Requires -Version 5.1
 
-# CompStats for Recycle - PowerShell Script to Generate Hardware Statistics
+# CompStats for Recycle - Version 1.0
+# Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
+# Project homepage: https://github.com/eskiiom/compstats4recycle
+#
 # Generates an HTML report with system, CPU, RAM, HDD (with SMART), and Battery info
 
 param()
+
+# Version info
+$scriptVersion = "1.0"
+$scriptDate = "2026-03-16"
 
 # Check for elevated privileges (admin rights)
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -29,6 +36,15 @@ if (-not $isAdmin) {
 # Force UTF-8 encoding for input and output
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
+
+# Display version info
+Write-Host ""
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host "CompStats for Recycle v$scriptVersion" -ForegroundColor Cyan
+Write-Host "Copyright (c) 2026 Guillaume COQUEBLIN" -ForegroundColor Cyan
+Write-Host "https://github.com/eskiiom/compstats4recycle" -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host ""
 
 # Function to get system information
 function Get-SystemInfo {
@@ -425,7 +441,7 @@ foreach ($hdd in $hdds) {
 $date = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $safeModel = $system.Model -replace "[\\/:*?""<>|]", "_"
 $safeSerial = $system.SerialNumber -replace "[\\/:*?""<>|]", "_"
-$filename = "$($system.Brand)_${safeModel}_${safeSerial}_$date.html"
+$filename = "$($system.Brand)_${safeModel}_${safeSerial}_${date}_CS4Rv$scriptVersion.html"
 $path = Join-Path $PSScriptRoot $filename
 
 # Prepare battery HTML
@@ -705,6 +721,10 @@ $html = @"
             </ul>
         </div>
     </div>
+    <footer style="text-align: center; margin-top: 30px; padding: 15px; background: #f8f9fa; border-radius: 5px; font-size: 0.9em; color: #666;">
+        <p><strong>CompStats for Recycle v$scriptVersion</strong> - Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)</p>
+        <p><a href="https://github.com/eskiiom/compstats4recycle" target="_blank">https://github.com/eskiiom/compstats4recycle</a></p>
+    </footer>
 </body>
 </html>
 "@
