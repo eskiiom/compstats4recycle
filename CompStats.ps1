@@ -40,7 +40,7 @@ if (-not $isAdmin) {
 # Display version info
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Cyan
-Write-Host "CompStats for Recycle v$scriptVersion" -ForegroundColor Cyan
+Write-Host "CompStats for Recycle v$scriptVersion ($scriptDate)" -ForegroundColor Cyan
 Write-Host "Copyright (c) 2026 Guillaume COQUEBLIN" -ForegroundColor Cyan
 Write-Host "https://github.com/eskiiom/compstats4recycle" -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
@@ -324,8 +324,8 @@ function Get-SMARTData {
         
         foreach ($devType in $deviceTypes) {
             try {
-                $args = @("-d", $devType, "-a", $linuxDevice)
-                $output = & $smartctlPath @args 2>&1
+                $smartArgs = @("-d", $devType, "-a", $linuxDevice)
+                $output = & $smartctlPath @smartArgs 2>&1
                 
                 # Check if we got SMART data (including NVMe format)
                 if ($output -match "Reallocated_Sector_Ct" -or $output -match "Power_On_Hours" -or $output -match "Power-On_Hours" -or $output -match "Data Units Written" -or $output -match "Percentage Used") {
@@ -476,25 +476,20 @@ if ($battery -is [hashtable]) {
 # Prepare health summary
 $summaryModel = "$($system.Model) ($($system.SerialNumber))"
 $summaryHDDs = ""
-$summaryBatteryHtml = ""
 $hddIndex = 1
 foreach ($hdd in $hdds) {
     $smart = $hdd.SMART
     $hddStatus = "OK"
-    $hddClass = "health-good"
     $capacity = $hdd.Size -replace " GB$", ""
     $capacity = [math]::Floor([double]$capacity)
     
     if ($smart -is [hashtable]) {
         if ($smart.Errors -and $smart.Errors -ne "N/A" -and $smart.Errors -ne "0") {
             $hddStatus = "KO"
-            $hddClass = "health-bad"
         } elseif ($smart.Temp -and $smart.Temp -ne "N/A" -and [int]$smart.Temp -gt 50) {
             $hddStatus = "KO"
-            $hddClass = "health-bad"
         } elseif ($smart.Health -and $smart.Health -eq "Warning") {
             $hddStatus = "Attention"
-            $hddClass = "health-warning"
         }
     }
     if ($hddIndex -gt 1) { $summaryHDDs += " | " }
