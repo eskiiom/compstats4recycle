@@ -21,6 +21,8 @@ Un script PowerShell amélioré pour générer des statistiques matérielles dé
 - **Suite de tests Pester** : les fonctions de calcul (parsing SMART, classification des disques, score global, etc.) sont couvertes par des tests automatisés
 - **Intégration continue** : les tests tournent automatiquement sur GitHub Actions à chaque push/pull request
 - **Purge optionnelle des rapports anciens** : `-PurgeReportsOlderThanDays` pour ne pas laisser le dossier `Rapports\` grossir indéfiniment
+- **Résumé affiché dans la console** : score global, disques, batterie et compatibilité Windows 11 imprimés directement à la fin de l'exécution — pas besoin d'ouvrir le rapport pour avoir le verdict
+- **Index des rapports** (`Rapports\index.html`) : liste triée par date de tous les rapports générés, avec score et lien direct vers chacun — pratique dès qu'on traite plusieurs machines
 
 ### 📊 Rapport HTML amélioré
 - **Mise en forme moderne** : Styles CSS améliorés avec couleurs d'état
@@ -98,6 +100,7 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 | `-Silent`                     | Ne demande pas l'élévation admin (utile pour traiter un parc de machines sans surveiller chaque poste) |
 | `-NoJson`                     | N'écrit pas l'export JSON par machine |
 | `-NoCsvLog`                   | N'ajoute pas de ligne au CSV consolidé |
+| `-NoIndex`                    | Ne régénère pas `Rapports\index.html` |
 | `-AssetTag "REF"`             | Optionnel — référence d'inventaire interne, ajoutée au nom de fichier, au CSV et au JSON |
 | `-BatteryGoodThreshold`       | Seuil "Excellent/Bon" pour la batterie, en % (défaut 80) |
 | `-BatteryWarningThreshold`    | Seuil "Bon/Attention" pour la batterie, en % (défaut 60) |
@@ -119,9 +122,10 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **Optionnel** : `smartctl.exe` pour les données SMART complètes (voir ci-dessous)
 
 ### 📄 Fichiers générés
-- **Rapport HTML** : `Rapports\[RéférenceInventaire_]Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.8.html` (nommage automatique, dossier créé automatiquement ; le préfixe de référence n'apparaît que si `-AssetTag` est fourni)
+- **Rapport HTML** : `Rapports\[RéférenceInventaire_]Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.9.html` (nommage automatique, dossier créé automatiquement ; le préfixe de référence n'apparaît que si `-AssetTag` est fourni)
 - **Export JSON** : même nom que le rapport HTML avec l'extension `.json` — toutes les données collectées, pour un traitement scripté (désactivable avec `-NoJson`)
 - **CSV consolidé** : `Rapports\resume.csv`, une ligne ajoutée à chaque exécution — pratique pour trier un lot de machines d'un coup d'œil (désactivable avec `-NoCsvLog`)
+- **Index des rapports** : `Rapports\index.html`, régénéré à chaque exécution à partir des exports JSON existants (désactivable avec `-NoIndex`, ou indisponible si `-NoJson` est utilisé)
 - **Rapport batterie** : `battery-report.html` (généré à la racine du script, réutilisé s'il a moins de 24h)
 
 ### 🔧 Configuration avancée
@@ -182,4 +186,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.8 - Dernière modification : 2026-09-10*
+*Version 1.9 - Dernière modification : 2026-09-10*

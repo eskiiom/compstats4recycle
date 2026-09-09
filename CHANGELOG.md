@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.9.0] - 2026-09-10
+
+### ✨ Ajouté
+- **Résumé affiché dans la console** à la fin de l'exécution : score global, disques, batterie, verdict Windows 11 et alerte chiffrement — sans avoir à ouvrir le rapport pour connaître le verdict, utile en traitant plusieurs machines à la suite
+- **Index des rapports** (`Rapports\index.html`) : reconstruit à chaque exécution à partir des exports JSON existants, liste tous les rapports triés par date avec score et lien direct. Nécessite les exports JSON (désactivable avec `-NoIndex`, absent si `-NoJson` est utilisé). Couvert par 4 nouveaux tests Pester, dont un vérifiant l'échappement HTML des données injectées dans la page
+
+---
+
 ## [1.8.0] - 2026-09-10
 
 ### ✨ Ajouté

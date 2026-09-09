@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.8
+# CompStats for Recycle - Version 1.9
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
@@ -10,6 +10,7 @@ param(
     [switch]$Silent,
     [switch]$NoJson,
     [switch]$NoCsvLog,
+    [switch]$NoIndex,
     [string]$AssetTag = "",
     [int]$BatteryGoodThreshold = 80,
     [int]$BatteryWarningThreshold = 60,
@@ -21,7 +22,7 @@ param(
 )
 
 # Version info
-$scriptVersion = "1.8"
+$scriptVersion = "1.9"
 $scriptDate = "2026-09-10"
 
 # Everything in this block only runs when the script is executed directly
@@ -759,6 +760,76 @@ function Remove-OldReports {
     return $removed
 }
 
+# Rebuild Rapports\index.html from every *.json report present, newest first,
+# so a technician can browse the whole batch (score, recommendation, model)
+# without opening each report individually. Needs the JSON exports (-NoJson
+# disables both). Returns the index path, or $null if nothing was written.
+function Update-ReportIndex {
+    param($ReportsDir)
+
+    $jsonFiles = Get-ChildItem -Path $ReportsDir -Filter "*.json" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if (-not $jsonFiles) { return $null }
+
+    $rows = @()
+    foreach ($file in $jsonFiles) {
+        $htmlName = [System.IO.Path]::ChangeExtension($file.Name, "html")
+        if (-not (Test-Path (Join-Path $ReportsDir $htmlName))) { continue }
+        try {
+            $data = Get-Content $file.FullName -Raw | ConvertFrom-Json
+        } catch { continue }
+
+        $rows += "<tr>" +
+        "<td>$(ConvertTo-HtmlSafe $data.GeneratedAt)</td>" +
+        "<td>$(ConvertTo-HtmlSafe $data.AssetTag)</td>" +
+        "<td>$(ConvertTo-HtmlSafe $data.System.Brand) $(ConvertTo-HtmlSafe $data.System.Model)</td>" +
+        "<td>$(ConvertTo-HtmlSafe $data.System.SerialNumber)</td>" +
+        "<td><span class='status-badge $($data.GlobalAssessment.BadgeClass)'>$($data.GlobalAssessment.Score)/100 - $(ConvertTo-HtmlSafe $data.GlobalAssessment.Label)</span></td>" +
+        "<td>$(ConvertTo-HtmlSafe $data.GlobalAssessment.Recommendation)</td>" +
+        "<td><a href='$([System.Uri]::EscapeDataString($htmlName))'>Ouvrir</a></td>" +
+        "</tr>"
+    }
+    if ($rows.Count -eq 0) { return $null }
+
+    $indexHtml = @"
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Index des rapports - CompStats for Recycle</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 1400px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #2c3e50; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f8f9fa; font-weight: bold; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9em; }
+        .status-ok { background: #27ae60; color: white; }
+        .status-warning { background: #f39c12; color: white; }
+        .status-bad { background: #e74c3c; color: white; }
+        a { color: #3498db; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Index des rapports ($($rows.Count))</h1>
+        <table>
+            <tr><th>Date</th><th>R&eacute;f&eacute;rence</th><th>Mod&egrave;le</th><th>Num&eacute;ro de s&eacute;rie</th><th>&Eacute;tat</th><th>Recommandation</th><th></th></tr>
+            $($rows -join "`n")
+        </table>
+    </div>
+</body>
+</html>
+"@
+
+    $indexPath = Join-Path $ReportsDir "index.html"
+    $utf8Bom = [System.Text.Encoding]::UTF8.GetPreamble()
+    [System.IO.File]::WriteAllBytes($indexPath, $utf8Bom + [System.Text.Encoding]::UTF8.GetBytes($indexHtml))
+    return $indexPath
+}
+
 # Classify a disk's overall health from its SMART data. Used both for the
 # summary badge and the detailed per-disk table so the two always agree - they
 # used to be computed independently and could disagree (a merely hot but
@@ -1313,3 +1384,30 @@ if (-not $NoCsvLog) {
         Write-Host "Erreur lors de l'ajout au CSV: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
+
+# Rebuild the browsable index of all reports (needs the JSON exports above)
+if (-not $NoIndex -and -not $NoJson) {
+    $indexPath = Update-ReportIndex -ReportsDir $reportsDir
+    if ($indexPath) { Write-Host "Index des rapports mis a jour: $indexPath" }
+}
+
+# Console summary: the verdict at a glance, without opening the report - useful
+# when processing several machines in a row
+Write-Host ""
+Write-Host "======================================" -ForegroundColor Cyan
+Write-Host "Resume" -ForegroundColor Cyan
+Write-Host "======================================" -ForegroundColor Cyan
+$scoreColor = if ($globalAssessment.Score -ge $ScoreGoodThreshold) { "Green" } elseif ($globalAssessment.Score -ge $ScoreWarningThreshold) { "Yellow" } else { "Red" }
+Write-Host "Score global    : $($globalAssessment.Score)/100 - $($globalAssessment.Label)" -ForegroundColor $scoreColor
+Write-Host "Recommandation  : $($globalAssessment.Recommendation)" -ForegroundColor $scoreColor
+Write-Host "Disques         : $summaryHDDsPlain"
+if ($hasBattery) {
+    Write-Host "Batterie        : $($battery.Health) ($($battery.HealthStatus))"
+} else {
+    Write-Host "Batterie        : N/A"
+}
+Write-Host "Windows 11      : $($win11.Verdict)"
+if ($encryption.Status -eq "AccessDenied") {
+    Write-Host "Chiffrement     : non verifie (relancer en administrateur)" -ForegroundColor Yellow
+}
+Write-Host ""

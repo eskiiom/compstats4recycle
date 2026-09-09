@@ -289,3 +289,63 @@ Describe "Remove-OldReports" {
         { Remove-OldReports -ReportsDir (Join-Path $TestDrive "DoesNotExist") -MaxAgeDays 30 } | Should Not Throw
     }
 }
+
+Describe "Update-ReportIndex" {
+    It "builds an index row per report with a matching HTML file" {
+        $dir = Join-Path $TestDrive "Rapports1"
+        New-Item -ItemType Directory -Path $dir | Out-Null
+
+        $data = @{
+            GeneratedAt = "2026-09-10 10:00:00"
+            AssetTag = "REF-42"
+            System = @{ Brand = "Dell Inc."; Model = "Precision 7760"; SerialNumber = "GZM66M3" }
+            GlobalAssessment = @{ Score = 80; Label = "Bon etat"; Recommendation = "Reemploi possible"; BadgeClass = "status-ok" }
+        }
+        $data | ConvertTo-Json -Depth 5 | Out-File (Join-Path $dir "Dell_Precision.json")
+        "<html></html>" | Out-File (Join-Path $dir "Dell_Precision.html")
+
+        $indexPath = Update-ReportIndex -ReportsDir $dir
+
+        $indexPath | Should Be (Join-Path $dir "index.html")
+        Test-Path $indexPath | Should Be $true
+        $content = Get-Content $indexPath -Raw
+        $content | Should Match "Precision 7760"
+        $content | Should Match "REF-42"
+        $content | Should Match "80/100"
+        $content | Should Match "Dell_Precision.html"
+    }
+
+    It "skips a JSON report whose HTML file is missing, without crashing" {
+        $dir = Join-Path $TestDrive "Rapports2"
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        @{ System = @{ Brand = "X" }; GlobalAssessment = @{ Score = 1; Label = ""; Recommendation = ""; BadgeClass = "" } } |
+            ConvertTo-Json -Depth 5 | Out-File (Join-Path $dir "orphan.json")
+        # no orphan.html on purpose
+
+        Update-ReportIndex -ReportsDir $dir | Should Be $null
+    }
+
+    It "returns null when there are no reports yet" {
+        $dir = Join-Path $TestDrive "RapportsEmpty"
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Update-ReportIndex -ReportsDir $dir | Should Be $null
+    }
+
+    It "HTML-escapes report data so a stray '<' or '&' can't break the index page" {
+        $dir = Join-Path $TestDrive "Rapports3"
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $data = @{
+            GeneratedAt = "2026-09-10 10:00:00"
+            AssetTag = "<script>alert(1)</script>"
+            System = @{ Brand = "A & B"; Model = "X"; SerialNumber = "1" }
+            GlobalAssessment = @{ Score = 1; Label = ""; Recommendation = ""; BadgeClass = "" }
+        }
+        $data | ConvertTo-Json -Depth 5 | Out-File (Join-Path $dir "r.json")
+        "<html></html>" | Out-File (Join-Path $dir "r.html")
+
+        $indexPath = Update-ReportIndex -ReportsDir $dir
+        $content = Get-Content $indexPath -Raw
+        $content | Should Not Match "<script>"
+        $content | Should Match "&amp; B"
+    }
+}
