@@ -3,5 +3,6 @@
 *.json
 Rapports/resume.csv
 
-# Ignore smartctl.exe if downloaded
+# Ignore smartctl.exe / smartmontools installer if downloaded
 smartctl.exe
+smartmontools-*.exe
