@@ -410,8 +410,8 @@ function Get-SMARTData {
                 $smartctlPath = $cmd.Source
             } catch {
                 Write-Host "smartctl introuvable, utilisation du fallback WMI (donnees SMART limitees)." -ForegroundColor Yellow
-                Write-Host "Pour des donnees SMART completes : placez smartctl.exe a cote du script," -ForegroundColor Yellow
-                Write-Host "ou installez smartmontools (https://github.com/smartmontools/smartmontools/releases/latest)." -ForegroundColor Yellow
+                Write-Host "Pour des donnees SMART completes : installez smartmontools" -ForegroundColor Yellow
+                Write-Host "(https://github.com/smartmontools/smartmontools/releases/latest) et relancez le script." -ForegroundColor Yellow
             }
         }
     }
@@ -834,10 +834,9 @@ $html = @"
                 "<details class='info-box'>
                     <summary>&#8505;&#65039; Donn&eacute;es SMART limit&eacute;es - comment les compl&eacute;ter ?</summary>
                     <ol>
-                        <li>T&eacute;l&eacute;charger smartmontools (version Windows, archive &laquo; without installer &raquo;) depuis <a href='https://github.com/smartmontools/smartmontools/releases/latest' target='_blank' rel='noopener'>GitHub</a> (ou, si accessible, <a href='https://www.smartmontools.org/wiki/Download' target='_blank' rel='noopener'>smartmontools.org</a>)</li>
-                        <li>Dans l'archive, r&eacute;cup&eacute;rer le fichier <code>bin\smartctl.exe</code></li>
-                        <li>Le copier dans le m&ecirc;me dossier que <code>CompStats.ps1</code></li>
-                        <li>Relancer le script (id&eacute;alement en tant qu'administrateur) pour obtenir les donn&eacute;es SMART compl&egrave;tes</li>
+                        <li>T&eacute;l&eacute;charger <code>smartmontools-x.x.win32-setup.exe</code> depuis <a href='https://github.com/smartmontools/smartmontools/releases/latest' target='_blank' rel='noopener'>GitHub</a> (ou, si accessible, <a href='https://www.smartmontools.org/wiki/Download' target='_blank' rel='noopener'>smartmontools.org</a>)</li>
+                        <li>Ex&eacute;cuter l'installateur (emplacement par d&eacute;faut, pas besoin de tout cocher)</li>
+                        <li>Relancer le script (id&eacute;alement en tant qu'administrateur) : <code>smartctl.exe</code> est d&eacute;tect&eacute; automatiquement dans <code>C:\Program Files\smartmontools\bin\</code>, aucune copie manuelle n&eacute;cessaire</li>
                     </ol>
                 </details>"
             })

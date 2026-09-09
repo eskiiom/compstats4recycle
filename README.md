@@ -95,7 +95,7 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **Rapport batterie** : `battery-report.html` (généré à la racine du script, réutilisé s'il a moins de 24h)
 
 ### 🔧 Configuration avancée
-- `smartctl.exe` n'est **pas** téléchargé automatiquement (le script ne télécharge et n'exécute aucun binaire externe). Pour des données SMART complètes, placez `smartctl.exe` à côté du script ou installez smartmontools depuis [GitHub](https://github.com/smartmontools/smartmontools/releases/latest) (le site officiel [smartmontools.org](https://www.smartmontools.org/) est parfois inaccessible derrière sa protection anti-bot) — sans lui, le script utilise un repli WMI (données plus limitées mais fonctionnel). Quand c'est le cas, le rapport HTML affiche lui-même un rappel des étapes à suivre (section Disques Durs, bloc repliable)
+- `smartctl.exe` n'est **pas** téléchargé automatiquement (le script ne télécharge et n'exécute aucun binaire externe). Pour des données SMART complètes, installez smartmontools (l'installateur Windows `smartmontools-x.x.win32-setup.exe`) depuis [GitHub](https://github.com/smartmontools/smartmontools/releases/latest) (le site officiel [smartmontools.org](https://www.smartmontools.org/) est parfois inaccessible derrière sa protection anti-bot) — le script détecte automatiquement `smartctl.exe` dans `C:\Program Files\smartmontools\bin\`, aucune copie manuelle nécessaire. Sans lui, le script utilise un repli WMI (données plus limitées mais fonctionnel) ; le rapport HTML affiche alors lui-même un rappel de ces étapes (section Disques Durs, bloc repliable)
 - Copiez `battery-report.html` existant pour éviter la regeneration
 - Modifiez les seuils d'alerte dans le script si besoin
 
