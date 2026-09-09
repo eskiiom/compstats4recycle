@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.6
+# CompStats for Recycle - Version 1.7
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
@@ -10,51 +10,64 @@ param(
     [switch]$Silent,
     [switch]$NoJson,
     [switch]$NoCsvLog,
-    [string]$AssetTag = ""
+    [string]$AssetTag = "",
+    [int]$BatteryGoodThreshold = 80,
+    [int]$BatteryWarningThreshold = 60,
+    [int]$BatteryCriticalThreshold = 40,
+    [int]$DiskTempWarningThreshold = 50,
+    [int]$ScoreGoodThreshold = 80,
+    [int]$ScoreWarningThreshold = 50
 )
 
 # Version info
-$scriptVersion = "1.6"
-$scriptDate = "2026-09-09"
+$scriptVersion = "1.7"
+$scriptDate = "2026-09-10"
 
-# Check for elevated privileges (admin rights)
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# Everything in this block only runs when the script is executed directly
+# (.\CompStats.ps1 or via powershell -File). Dot-sourcing it - as the Pester
+# test suite does, to reach the functions below without side effects - leaves
+# $MyInvocation.InvocationName as "." instead of the script path/name.
+if ($MyInvocation.InvocationName -ne '.') {
 
-if (-not $isAdmin) {
-    Write-Host ""
-    Write-Host "======================================" -ForegroundColor Yellow
-    Write-Host "ATTENTION: Droits administrateur requis" -ForegroundColor Yellow
-    Write-Host "======================================" -ForegroundColor Yellow
-    Write-Host "smartctl necessite des privileges eleves pour fonctionner correctement." -ForegroundColor Yellow
-    Write-Host ""
-    if ($Silent) {
-        Write-Host "Mode -Silent : poursuite sans elevation (donnees SMART limitees au fallback WMI)." -ForegroundColor Yellow
+    # Check for elevated privileges (admin rights)
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if (-not $isAdmin) {
         Write-Host ""
-    } else {
-        $response = Read-Host "Voulez-vous redemarrer le script en mode administrateur? (O/N)"
-        if ($response -eq "O" -or $response -eq "o") {
-            Write-Host "Redemarrage en cours..." -ForegroundColor Green
-            Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-            exit
-        } else {
-            Write-Host "Le script continuera sans les donnees SMART complete." -ForegroundColor Yellow
+        Write-Host "======================================" -ForegroundColor Yellow
+        Write-Host "ATTENTION: Droits administrateur requis" -ForegroundColor Yellow
+        Write-Host "======================================" -ForegroundColor Yellow
+        Write-Host "smartctl necessite des privileges eleves pour fonctionner correctement." -ForegroundColor Yellow
+        Write-Host ""
+        if ($Silent) {
+            Write-Host "Mode -Silent : poursuite sans elevation (donnees SMART limitees au fallback WMI)." -ForegroundColor Yellow
             Write-Host ""
+        } else {
+            $response = Read-Host "Voulez-vous redemarrer le script en mode administrateur? (O/N)"
+            if ($response -eq "O" -or $response -eq "o") {
+                Write-Host "Redemarrage en cours..." -ForegroundColor Green
+                Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+                exit
+            } else {
+                Write-Host "Le script continuera sans les donnees SMART complete." -ForegroundColor Yellow
+                Write-Host ""
+            }
         }
     }
+
+    # Force UTF-8 encoding for input and output
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    [System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
+
+    # Display version info
+    Write-Host ""
+    Write-Host "======================================" -ForegroundColor Cyan
+    Write-Host "CompStats for Recycle v$scriptVersion ($scriptDate)" -ForegroundColor Cyan
+    Write-Host "Copyright (c) 2026 Guillaume COQUEBLIN" -ForegroundColor Cyan
+    Write-Host "https://github.com/eskiiom/compstats4recycle" -ForegroundColor Cyan
+    Write-Host "======================================" -ForegroundColor Cyan
+    Write-Host ""
 }
-
-# Force UTF-8 encoding for input and output
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[System.Console]::InputEncoding = [System.Text.Encoding]::UTF8
-
-# Display version info
-Write-Host ""
-Write-Host "======================================" -ForegroundColor Cyan
-Write-Host "CompStats for Recycle v$scriptVersion ($scriptDate)" -ForegroundColor Cyan
-Write-Host "Copyright (c) 2026 Guillaume COQUEBLIN" -ForegroundColor Cyan
-Write-Host "https://github.com/eskiiom/compstats4recycle" -ForegroundColor Cyan
-Write-Host "======================================" -ForegroundColor Cyan
-Write-Host ""
 
 # Function to get system information
 function Get-SystemInfo {
@@ -381,17 +394,32 @@ function Get-EncryptionInfo {
         }
         return @{ Status = $status; Volumes = @() }
     }
+    # Map drive letters to physical disk numbers so the report can show a
+    # volume's encryption status directly on its physical disk's card instead
+    # of only in a separate, harder-to-correlate list. Read-only, no admin
+    # rights needed - if it fails for any reason, PhysicalDiskNumber stays
+    # $null and the volume just falls back to the standalone list.
+    $driveToDisk = @{}
+    try {
+        Get-Partition -ErrorAction Stop | Where-Object { $_.DriveLetter } | ForEach-Object {
+            $driveToDisk["$($_.DriveLetter):"] = $_.DiskNumber
+        }
+    } catch { }
+
     $results = $volumes | ForEach-Object {
         $protectionStatus = switch ($_.ProtectionStatus) {
             "On" { "Chiffre" }
             "Off" { "Non chiffre" }
             default { "Inconnu" }
         }
+        $diskNumber = $null
+        if ($driveToDisk.ContainsKey($_.MountPoint)) { $diskNumber = $driveToDisk[$_.MountPoint] }
         @{
             MountPoint = $_.MountPoint
             ProtectionStatus = $protectionStatus
             EncryptionMethod = $_.EncryptionMethod
             VolumeStatus = $_.VolumeStatus
+            PhysicalDiskNumber = $diskNumber
         }
     }
     return @{ Status = "OK"; Volumes = @($results) }
@@ -399,6 +427,7 @@ function Get-EncryptionInfo {
 
 # Function to get battery information using powercfg
 function Get-BatteryInfo {
+    param($GoodThreshold = 80, $WarningThreshold = 60, $CriticalThreshold = 40)
     $tempFile = Join-Path $env:TEMP "battery_report.html"
     $scriptDirFile = Join-Path $PSScriptRoot "battery-report.html"
     $rootFile = "C:\battery-report.html"
@@ -439,11 +468,11 @@ function Get-BatteryInfo {
                 $content = Get-Content $scriptDirFile -Raw
                 Write-Host "Rapport de batterie genere: $scriptDirFile"
             } else {
-                return "No battery detected"
+                return "Aucune batterie detectee"
             }
         } catch {
             Write-Host "Erreur lors de la generation du rapport: $($_.Exception.Message)"
-            return "No battery detected"
+            return "Aucune batterie detectee"
         } finally {
             if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
         }
@@ -510,7 +539,7 @@ function Get-BatteryInfo {
         $health = if ($design -gt 0) { [math]::Round(($full / $design) * 100, 2) } else { 0 }
         
         # Determine health status
-        $healthStatus = if ($health -ge 80) { "Excellent" } elseif ($health -ge 60) { "Bon" } elseif ($health -ge 40) { "Attention" } else { "Critique" }
+        $healthStatus = if ($health -ge $GoodThreshold) { "Excellent" } elseif ($health -ge $WarningThreshold) { "Bon" } elseif ($health -ge $CriticalThreshold) { "Attention" } else { "Critique" }
         
         return @{
             Name = if ($batteryName) { $batteryName } else { "Non detecte" }
@@ -527,7 +556,7 @@ function Get-BatteryInfo {
             BatteryLifeDesign = if ($batteryLifeDesign) { $batteryLifeDesign } else { "Non disponible" }
         }
     }
-    return "No battery detected"
+    return "Aucune batterie detectee"
 }
 
 # Extract a numeric value from smartctl output for a given attribute/field name.
@@ -542,7 +571,11 @@ function Get-SmartNumericValue {
         $match = $Output | Select-String $pattern | Select-Object -First 1
         if (-not $match) { continue }
         if ($Trailing) {
-            if ($match.Line.Trim() -match '(\d[\d,]*)\s*$') { return ($matches[1] -replace ',', '') }
+            # Temperature_Celsius rows often end with a "(Min/Max 20/45)" note,
+            # which would otherwise make the trailing-digit match fail entirely
+            # since the line no longer ends in a digit
+            $line = $match.Line.Trim() -replace '\s*\([^)]*\)\s*$', ''
+            if ($line -match '(\d[\d,]*)\s*$') { return ($matches[1] -replace ',', '') }
         } else {
             if ($match.Line -match ':\s*(\d[\d,]*)') { return ($matches[1] -replace ',', '') }
         }
@@ -631,10 +664,10 @@ function Get-SMARTData {
                     $wearLevel = "N/A"
                     $wearVal = Get-SmartNumericValue -Output $output -Patterns @('Percent_Lifetime_Remain', 'Wear_Leveling_Count') -Trailing
                     if ($null -ne $wearVal) {
-                        $wearLevel = "$wearVal% remaining"
+                        $wearLevel = "$wearVal% restant"
                     } else {
                         $wearVal = Get-SmartNumericValue -Output $output -Patterns @('Percentage Used')
-                        if ($null -ne $wearVal) { $wearLevel = "$wearVal% used" }
+                        if ($null -ne $wearVal) { $wearLevel = "$wearVal% use" }
                     }
                     
                     # Parse model/serial/firmware so the report is complete even when
@@ -689,7 +722,7 @@ function Get-SMARTData {
                 }
             }
         } catch {
-            return "Unable to read SMART data"
+            return "Impossible de lire les donnees SMART"
         }
     }
     
@@ -704,9 +737,62 @@ function ConvertTo-HtmlSafe {
     [System.Net.WebUtility]::HtmlEncode([string]$Value)
 }
 
+# Classify a disk's overall health from its SMART data. Used both for the
+# summary badge and the detailed per-disk table so the two always agree - they
+# used to be computed independently and could disagree (a merely hot but
+# otherwise healthy disk showed as "KO" in the summary but only "Attention" in
+# the detailed table).
+function Get-DiskHealthStatus {
+    param($Smart, [int]$TempThreshold = 50)
+
+    $status = "OK"
+    $label = "OK"
+    $cssClass = "health-good"
+    $alertMessage = ""
+
+    if ($Smart -is [hashtable]) {
+        $errorsVal = 0
+        if ($Smart.Errors -and $Smart.Errors -ne "N/A" -and [int]::TryParse($Smart.Errors, [ref]$errorsVal) -and $errorsVal -gt 0) {
+            $status = "KO"
+            $label = "Probleme detecte"
+            $cssClass = "health-bad"
+            $alertMessage = "Secteurs realloues detectes"
+        } elseif ($Smart.Temp -and $Smart.Temp -ne "N/A") {
+            $tempVal = 0
+            if ([int]::TryParse($Smart.Temp, [ref]$tempVal) -and $tempVal -gt $TempThreshold) {
+                $status = "Attention"
+                $label = "Temperature elevee"
+                $cssClass = "health-warning"
+                $alertMessage = "Temperature > ${TempThreshold}C"
+            }
+        } elseif ($Smart.Health -and $Smart.Health -ne "Unknown") {
+            if ($Smart.Health -eq "Warning") {
+                $status = "Attention"
+                $label = "Avertissement"
+                $cssClass = "health-warning"
+            }
+        } elseif ($Smart.Status -and $Smart.Status -ne "OK") {
+            $status = "Attention"
+            $label = $Smart.Status
+            $cssClass = "health-warning"
+        }
+    }
+
+    return @{
+        Status = $status
+        Label = $label
+        CssClass = $cssClass
+        AlertMessage = $alertMessage
+    }
+}
+
 # Aggregate disk and battery status into a single recycling recommendation
 function Get-GlobalAssessment {
-    param($diskStatuses, $hasBattery, $batteryHealthValue)
+    param(
+        $diskStatuses, $hasBattery, $batteryHealthValue,
+        [int]$BatteryGoodThreshold = 80, [int]$BatteryWarningThreshold = 60, [int]$BatteryCriticalThreshold = 40,
+        [int]$ScoreGoodThreshold = 80, [int]$ScoreWarningThreshold = 50
+    )
 
     $score = 100
     foreach ($status in $diskStatuses) {
@@ -714,17 +800,17 @@ function Get-GlobalAssessment {
         elseif ($status -eq "Attention") { $score -= 12 }
     }
     if ($hasBattery) {
-        if ($batteryHealthValue -lt 40) { $score -= 35 }
-        elseif ($batteryHealthValue -lt 60) { $score -= 20 }
-        elseif ($batteryHealthValue -lt 80) { $score -= 8 }
+        if ($batteryHealthValue -lt $BatteryCriticalThreshold) { $score -= 35 }
+        elseif ($batteryHealthValue -lt $BatteryWarningThreshold) { $score -= 20 }
+        elseif ($batteryHealthValue -lt $BatteryGoodThreshold) { $score -= 8 }
     }
     $score = [Math]::Max(0, [Math]::Min(100, $score))
 
-    if ($score -ge 80) {
+    if ($score -ge $ScoreGoodThreshold) {
         $label = "Bon etat"
         $recommendation = "Reemploi possible"
         $badgeClass = "status-ok"
-    } elseif ($score -ge 50) {
+    } elseif ($score -ge $ScoreWarningThreshold) {
         $label = "Attention"
         $recommendation = "Verifier avant reemploi"
         $badgeClass = "status-warning"
@@ -742,7 +828,10 @@ function Get-GlobalAssessment {
     }
 }
 
-# Main script execution
+# Main script execution - skipped when the script is dot-sourced (see the
+# matching guard near the top of the file, and the Pester test suite)
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 $system = Get-SystemInfo
 $productKey = Get-WindowsProductKey
 $cpu = Get-CPUInfo
@@ -753,7 +842,7 @@ $network = @(Get-NetworkInfo)
 $ram = Get-RAMInfo
 $hdds = @(Get-HDDInfo)
 $encryption = Get-EncryptionInfo
-$battery = Get-BatteryInfo
+$battery = Get-BatteryInfo -GoodThreshold $BatteryGoodThreshold -WarningThreshold $BatteryWarningThreshold -CriticalThreshold $BatteryCriticalThreshold
 $win11 = Get-Windows11Compatibility -ram $ram -hdds $hdds
 
 # Add SMART data to HDDs
@@ -785,7 +874,7 @@ if ($battery -is [hashtable]) {
     # Determine health class
     if ($healthValue -match '^\d') {
         $h = [double]$healthValue.Trim('%')
-        $healthClass = if ($h -ge 80) { "health-good" } elseif ($h -ge 60) { "health-warning" } else { "health-bad" }
+        $healthClass = if ($h -ge $BatteryGoodThreshold) { "health-good" } elseif ($h -ge $BatteryWarningThreshold) { "health-warning" } else { "health-bad" }
     }
     
     $batteryHtml = @"
@@ -815,20 +904,11 @@ $smartctlMissing = $false
 $hddIndex = 1
 foreach ($hdd in $hdds) {
     $smart = $hdd.SMART
-    $hddStatus = "OK"
     $capacity = $hdd.Size -replace " GB$", ""
     $capacity = [math]::Floor([double]$capacity)
 
-    if ($smart -is [hashtable]) {
-        if ($smart.Source -eq "WMI") { $smartctlMissing = $true }
-        if ($smart.Errors -and $smart.Errors -ne "N/A" -and $smart.Errors -ne "0") {
-            $hddStatus = "KO"
-        } elseif ($smart.Temp -and $smart.Temp -ne "N/A" -and [int]$smart.Temp -gt 50) {
-            $hddStatus = "KO"
-        } elseif ($smart.Health -and $smart.Health -eq "Warning") {
-            $hddStatus = "Attention"
-        }
-    }
+    if ($smart -is [hashtable] -and $smart.Source -eq "WMI") { $smartctlMissing = $true }
+    $hddStatus = (Get-DiskHealthStatus -Smart $smart -TempThreshold $DiskTempWarningThreshold).Status
     $diskStatuses += $hddStatus
     if ($hddIndex -gt 1) { $summaryHDDs += " | "; $summaryHDDsPlain += " | " }
     $statusBadge = if ($hddStatus -eq "OK") { "status-ok" } elseif ($hddStatus -eq "Attention") { "status-warning" } else { "status-bad" }
@@ -845,8 +925,8 @@ if ($hasBattery) {
     $batBadge = "status-ok"
     if ($batHealth -match '(\d+)') {
         $h = [int]$matches[1]
-        if ($h -lt 60) { $batBadge = "status-bad" }
-        elseif ($h -lt 80) { $batBadge = "status-warning" }
+        if ($h -lt $BatteryWarningThreshold) { $batBadge = "status-bad" }
+        elseif ($h -lt $BatteryGoodThreshold) { $batBadge = "status-warning" }
     }
     $summaryBattery = "<span class='status-badge $batBadge'>$batHealth</span> ($($battery.BatteryLifeFull))"
 } else {
@@ -854,7 +934,15 @@ if ($hasBattery) {
     $summaryBattery = "N/A"
 }
 
-$globalAssessment = Get-GlobalAssessment -diskStatuses $diskStatuses -hasBattery $hasBattery -batteryHealthValue $batHealthValue
+$globalAssessment = Get-GlobalAssessment -diskStatuses $diskStatuses -hasBattery $hasBattery -batteryHealthValue $batHealthValue `
+    -BatteryGoodThreshold $BatteryGoodThreshold -BatteryWarningThreshold $BatteryWarningThreshold -BatteryCriticalThreshold $BatteryCriticalThreshold `
+    -ScoreGoodThreshold $ScoreGoodThreshold -ScoreWarningThreshold $ScoreWarningThreshold
+
+# Physical disk device IDs, used below to only list encrypted volumes in the
+# standalone "Chiffrement des volumes" section when they could NOT be matched
+# to one of the disk cards above (where they're already shown inline)
+$hddDeviceIds = @($hdds | ForEach-Object { "$($_.DeviceID)" })
+$unmatchedVolumes = @($encryption.Volumes | Where-Object { $null -eq $_.PhysicalDiskNumber -or "$($_.PhysicalDiskNumber)" -notin $hddDeviceIds })
 
 # HTML content
 $html = @"
@@ -1022,44 +1110,15 @@ $html = @"
             })
             $($hdds | ForEach-Object {
                 $smart = $_.SMART
-                
-                # Determine health class based on available data
-                $healthClass = "health-good"
-                $healthStatus = "OK"
-                $alertMessage = ""
-                
-                if ($smart -is [hashtable]) {
-                    # Check for SMART data errors
-                    $errorsVal = 0
-                    if ($smart.Errors -and $smart.Errors -ne "N/A" -and [int]::TryParse($smart.Errors, [ref]$errorsVal) -and $errorsVal -gt 0) {
-                        $healthClass = "health-bad"
-                        $healthStatus = "Problem detected"
-                        $alertMessage = "Reallocated sectors detected"
-                    }
-                    # Check temperature
-                    elseif ($smart.Temp -and $smart.Temp -ne "N/A") {
-                        $tempVal = 0
-                        if ([int]::TryParse($smart.Temp, [ref]$tempVal) -and $tempVal -gt 50) {
-                            $healthClass = "health-warning"
-                            $healthStatus = "High temperature"
-                            $alertMessage = "Temperature > 50C"
-                        }
-                    }
-                    # Check WMI health status
-                    elseif ($smart.Health -and $smart.Health -ne "Unknown") {
-                        if ($smart.Health -eq "Warning") {
-                            $healthClass = "health-warning"
-                            $healthStatus = "Warning"
-                        }
-                    }
-                    # Check disk status from WMI
-                    elseif ($smart.Status -and $smart.Status -ne "OK") {
-                        $healthClass = "health-warning"
-                        $healthStatus = $smart.Status
-                    }
-                }
-                
-                $rpmDisplay = if ($_.SpindleSpeed -and [int]$_.SpindleSpeed -gt 0) { "$($_.SpindleSpeed) RPM" } elseif ($_.Type -eq "SSD") { "N/A (SSD)" } else { "Not available" }
+                $currentDeviceId = $_.DeviceID
+
+                # Same classification as the summary badge above - see Get-DiskHealthStatus
+                $diskHealth = Get-DiskHealthStatus -Smart $smart -TempThreshold $DiskTempWarningThreshold
+                $healthClass = $diskHealth.CssClass
+                $healthStatus = $diskHealth.Label
+                $alertMessage = $diskHealth.AlertMessage
+
+                $rpmDisplay = if ($_.SpindleSpeed -and [int]$_.SpindleSpeed -gt 0) { "$($_.SpindleSpeed) RPM" } elseif ($_.Type -eq "SSD") { "Non applicable (SSD)" } else { "Non disponible" }
 
                 "<div style='margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; border-radius: 5px;'>"
                 "<table>"
@@ -1079,10 +1138,10 @@ $html = @"
                     }
                     
                     # SMART data with proper display
-                    $errorsDisplay = if ($smart.Errors -ne "N/A") { $smart.Errors } else { "Not available" }
-                    $hoursDisplay = if ($smart.Hours -ne "N/A") { "$($smart.Hours) hours" } else { "Not available" }
-                    $tempDisplay = if ($smart.Temp -ne "N/A") { "$($smart.Temp) C" } else { "Not available" }
-                    $wearDisplay = if ($smart.WearLevel -ne "N/A") { $smart.WearLevel } else { "Not available" }
+                    $errorsDisplay = if ($smart.Errors -ne "N/A") { $smart.Errors } else { "Non disponible" }
+                    $hoursDisplay = if ($smart.Hours -ne "N/A") { "$($smart.Hours) heures" } else { "Non disponible" }
+                    $tempDisplay = if ($smart.Temp -ne "N/A") { "$($smart.Temp) C" } else { "Non disponible" }
+                    $wearDisplay = if ($smart.WearLevel -ne "N/A") { $smart.WearLevel } else { "Non disponible" }
                     
                     "<tr><th>Secteurs realloues</th><td class='$healthClass'>$errorsDisplay</td></tr>"
                     "<tr><th>Heures utilisation</th><td>$hoursDisplay</td></tr>"
@@ -1099,17 +1158,22 @@ $html = @"
                 } else {
                     "<tr><th>SMART</th><td>$smart</td></tr>"
                 }
+                $diskVolumes = @($encryption.Volumes | Where-Object { $null -ne $_.PhysicalDiskNumber -and "$($_.PhysicalDiskNumber)" -eq "$currentDeviceId" })
+                foreach ($vol in $diskVolumes) {
+                    $volClass = if ($vol.ProtectionStatus -eq "Chiffre") { "health-warning" } else { "health-good" }
+                    "<tr><th>Chiffrement ($($vol.MountPoint))</th><td class='$volClass'>$($vol.ProtectionStatus)</td></tr>"
+                }
                 "</table>"
                 "</div>"
             })
         </div>
 
-        $(if ($encryption.Status -eq "OK" -and $encryption.Volumes.Count -gt 0) {
+        $(if ($unmatchedVolumes.Count -gt 0) {
             "<div class='section'>
             <h2>Chiffrement des volumes</h2>
             <table>
                 <tr><th>Volume</th><th>Statut</th><th>M&eacute;thode</th></tr>
-                $($encryption.Volumes | ForEach-Object { "<tr><td>$($_.MountPoint)</td><td class='$(if ($_.ProtectionStatus -eq "Chiffre") { "health-warning" } else { "health-good" })'>$($_.ProtectionStatus)</td><td>$($_.EncryptionMethod)</td></tr>" })
+                $($unmatchedVolumes | ForEach-Object { "<tr><td>$($_.MountPoint)</td><td class='$(if ($_.ProtectionStatus -eq "Chiffre") { "health-warning" } else { "health-good" })'>$($_.ProtectionStatus)</td><td>$($_.EncryptionMethod)</td></tr>" })
             </table>
             <p style='font-size: 0.85em; color: #666; margin-top: 10px;'><em>Un volume chiffr&eacute; n&eacute;cessite sa cl&eacute; de r&eacute;cup&eacute;ration avant tout effacement ou r&eacute;emploi.</em></p>
             </div>"

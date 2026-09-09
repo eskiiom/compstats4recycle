@@ -13,6 +13,10 @@ Un script PowerShell amélioré pour générer des statistiques matérielles dé
 - **Gestion d'erreurs** : les échecs de lecture WMI/CIM produisent un rapport partiel au lieu de faire planter le script
 - **Mode `-Silent`** : traitement d'un parc de machines sans prompt d'élévation à chaque poste
 - **Exports JSON et CSV** : en plus du HTML, pour un traitement scripté ou le tri d'un lot de machines
+- **Seuils d'alerte configurables** : batterie, température disque et score global réglables par paramètre, sans éditer le script
+- **Chiffrement rattaché au disque physique** : le statut BitLocker apparaît directement sur la fiche du disque concerné plutôt que dans une liste séparée à corréler soi-même
+- **Cohérence linguistique** : le rapport est entièrement en français (plusieurs statuts internes restaient en anglais)
+- **Suite de tests Pester** : les fonctions de calcul (parsing SMART, classification des disques, score global, etc.) sont couvertes par des tests automatisés
 
 ### 📊 Rapport HTML amélioré
 - **Mise en forme moderne** : Styles CSS améliorés avec couleurs d'état
@@ -60,7 +64,8 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - Détection fiabilisée sur plusieurs disques : le protocole SMART (SATA/NVMe) suit le bus réel de chaque disque au lieu de supposer un ordre fixe
 
 ### 🔒 Chiffrement (BitLocker)
-- Statut de chiffrement par volume — savoir qu'un disque est chiffré *avant* de l'effacer évite de se retrouver bloqué sans clé de récupération
+- Statut de chiffrement affiché directement sur la fiche du disque physique concerné — savoir qu'un disque est chiffré *avant* de l'effacer évite de se retrouver bloqué sans clé de récupération
+- Les volumes qui n'ont pas pu être rattachés à un disque physique apparaissent dans une section séparée
 - Nécessite les droits administrateur : sans eux, le rapport l'indique explicitement (`Statut non vérifié`) plutôt que d'afficher à tort "non chiffré"
 
 ### 🔋 Batterie
@@ -83,16 +88,23 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 ```
 
 ### ⚙️ Paramètres
-| Paramètre         | Effet |
-|-------------------|-------|
-| `-Silent`         | Ne demande pas l'élévation admin (utile pour traiter un parc de machines sans surveiller chaque poste) |
-| `-NoJson`         | N'écrit pas l'export JSON par machine |
-| `-NoCsvLog`       | N'ajoute pas de ligne au CSV consolidé |
-| `-AssetTag "REF"` | Optionnel — référence d'inventaire interne, ajoutée au nom de fichier, au CSV et au JSON |
+| Paramètre                    | Effet |
+|-------------------------------|-------|
+| `-Silent`                     | Ne demande pas l'élévation admin (utile pour traiter un parc de machines sans surveiller chaque poste) |
+| `-NoJson`                     | N'écrit pas l'export JSON par machine |
+| `-NoCsvLog`                   | N'ajoute pas de ligne au CSV consolidé |
+| `-AssetTag "REF"`             | Optionnel — référence d'inventaire interne, ajoutée au nom de fichier, au CSV et au JSON |
+| `-BatteryGoodThreshold`       | Seuil "Excellent/Bon" pour la batterie, en % (défaut 80) |
+| `-BatteryWarningThreshold`    | Seuil "Bon/Attention" pour la batterie, en % (défaut 60) |
+| `-BatteryCriticalThreshold`   | Seuil "Attention/Critique" pour la batterie, en % (défaut 40) |
+| `-DiskTempWarningThreshold`   | Température disque (°C) à partir de laquelle un disque passe en "Attention" (défaut 50) |
+| `-ScoreGoodThreshold`         | Score global à partir duquel la machine est "Bon état" (défaut 80) |
+| `-ScoreWarningThreshold`      | Score global à partir duquel la machine est "Attention" plutôt que "Critique" (défaut 50) |
 
 ```powershell
 .\CompStats.ps1 -Silent
 .\CompStats.ps1 -AssetTag "REF-1234"
+.\CompStats.ps1 -DiskTempWarningThreshold 45 -BatteryCriticalThreshold 30
 ```
 
 ### 📋 Prérequis
@@ -100,7 +112,7 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **Optionnel** : `smartctl.exe` pour les données SMART complètes (voir ci-dessous)
 
 ### 📄 Fichiers générés
-- **Rapport HTML** : `Rapports\[RéférenceInventaire_]Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.6.html` (nommage automatique, dossier créé automatiquement ; le préfixe de référence n'apparaît que si `-AssetTag` est fourni)
+- **Rapport HTML** : `Rapports\[RéférenceInventaire_]Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.7.html` (nommage automatique, dossier créé automatiquement ; le préfixe de référence n'apparaît que si `-AssetTag` est fourni)
 - **Export JSON** : même nom que le rapport HTML avec l'extension `.json` — toutes les données collectées, pour un traitement scripté (désactivable avec `-NoJson`)
 - **CSV consolidé** : `Rapports\resume.csv`, une ligne ajoutée à chaque exécution — pratique pour trier un lot de machines d'un coup d'œil (désactivable avec `-NoCsvLog`)
 - **Rapport batterie** : `battery-report.html` (généré à la racine du script, réutilisé s'il a moins de 24h)
@@ -108,7 +120,18 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 ### 🔧 Configuration avancée
 - `smartctl.exe` n'est **pas** téléchargé automatiquement (le script ne télécharge et n'exécute aucun binaire externe). Pour des données SMART complètes, installez smartmontools (l'installateur Windows `smartmontools-x.x.win32-setup.exe`) depuis [GitHub](https://github.com/smartmontools/smartmontools/releases/latest) (le site officiel [smartmontools.org](https://www.smartmontools.org/) est parfois inaccessible derrière sa protection anti-bot) — le script détecte automatiquement `smartctl.exe` dans `C:\Program Files\smartmontools\bin\`, aucune copie manuelle nécessaire. Sans lui, le script utilise un repli WMI (données plus limitées mais fonctionnel) ; le rapport HTML affiche alors lui-même un rappel de ces étapes (section Disques Durs, bloc repliable)
 - Copiez `battery-report.html` existant pour éviter la regeneration
-- Modifiez les seuils d'alerte dans le script si besoin
+- Les seuils d'alerte (batterie, température disque, score global) sont réglables via les paramètres ci-dessus, sans toucher au code
+
+## 🧪 Tests
+
+Deux niveaux de vérification, dans le dépôt :
+- `validation-syntax.ps1` : vérifie que le script est syntaxiquement valide et que les fonctions/fonctionnalités attendues sont présentes
+- `CompStats.Tests.ps1` : tests [Pester](https://pester.dev/) sur le comportement réel des fonctions de calcul (parsing SMART ATA/NVMe, classification des disques, score global, échappement HTML, compatibilité Windows 11, statut BitLocker) — dot-source `CompStats.ps1` sans l'exécuter (aucune élévation, aucun fichier écrit)
+
+```powershell
+.\validation-syntax.ps1
+Invoke-Pester .\CompStats.Tests.ps1
+```
 
 ## 📊 Indicateurs de Santé
 
@@ -152,4 +175,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.6 - Dernière modification : 2026-09-09*
+*Version 1.7 - Dernière modification : 2026-09-10*

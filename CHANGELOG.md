@@ -2,6 +2,21 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.7.0] - 2026-09-10
+
+### ✨ Ajouté
+- **Seuils d'alerte configurables** : `-BatteryGoodThreshold`, `-BatteryWarningThreshold`, `-BatteryCriticalThreshold`, `-DiskTempWarningThreshold`, `-ScoreGoodThreshold`, `-ScoreWarningThreshold` remplacent les valeurs codées en dur et dupliquées à plusieurs endroits du script
+- **Chiffrement BitLocker rattaché au disque physique** : le statut apparaît directement sur la fiche du disque concerné (via `Get-Partition` pour associer lettre de volume et numéro de disque) ; les volumes non rattachables restent listés séparément
+- **Suite de tests Pester** (`CompStats.Tests.ps1`, 30 tests) couvrant le parsing SMART (ATA/NVMe), la classification des disques, le score global, l'échappement HTML, la compatibilité Windows 11 et le statut BitLocker — le script est maintenant dot-sourceable sans effet de bord (aucune élévation, aucun fichier écrit) pour permettre ces tests
+
+### 🐛 Corrigé
+- **Cohérence linguistique** : plusieurs statuts internes restaient en anglais dans le rapport ("Not available", "Problem detected", "High temperature", "Warning", "No battery detected"...), à côté de libellés français partout ailleurs
+- **Classification disque incohérente entre résumé et détail** : un disque simplement chaud (mais sans erreur) pouvait apparaître "KO" dans le résumé exécutif et seulement "Attention" dans sa fiche détaillée, car les deux vues dupliquaient chacune leur propre logique de classification avec des seuils de gravité différents. Unifié dans `Get-DiskHealthStatus`, utilisée par les deux
+- **Parsing de la température ATA avec annotation `(Min/Max ...)`** : trouvé par la nouvelle suite de tests — `smartctl` ajoute souvent une note `(Min/Max 20/45)` après la valeur de température sur les disques ATA/SATA, ce qui faisait échouer entièrement l'extraction (la regex de fin de ligne ne trouvait plus de chiffre terminal)
+- **Bug de portée PowerShell** dans le rattachement BitLocker→disque : `-not $_.PhysicalDiskNumber` traite le disque numéro 0 comme "faux" (falsy), ce qui aurait dupliqué l'affichage d'un volume chiffré sur le disque 0 (le cas le plus courant) à la fois dans sa fiche et dans la liste séparée. Corrigé avec une comparaison explicite à `$null`
+
+---
+
 ## [1.6.0] - 2026-09-09
 
 ### ✨ Ajouté
