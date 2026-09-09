@@ -2,6 +2,21 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.6.0] - 2026-09-09
+
+### ✨ Ajouté
+- **Compatibilité Windows 11** (indicative) : TPM, Secure Boot, RAM ≥ 4 Go, stockage ≥ 64 Go, avec un verdict Compatible / Non compatible / Indéterminé. Ne vérifie pas le modèle de CPU contre la liste officielle Microsoft
+- **Clé de licence Windows embarquée au BIOS** (`SoftwareLicensingService.OA3xOriginalProductKey`), affichée dans la section Système quand elle existe
+- **Statut de chiffrement BitLocker** par volume, avec une distinction explicite entre "non chiffré" et "non vérifié (droits administrateur requis)"
+- **Adresses MAC** des interfaces réseau physiques (section Réseau)
+- **Paramètre `-AssetTag`** optionnel : référence d'inventaire interne ajoutée au nom de fichier, au CSV et au JSON
+
+### 🐛 Corrigé
+- **Faux "Non compatible Windows 11"** : les vérifications TPM et Secure Boot échouent avec une erreur d'accès refusé sans droits administrateur ; la première version de ce correctif traitait cet échec comme "TPM absent" / "Secure Boot non supporté", ce qui aurait affiché à tort un verdict rouge "Non compatible" sur des machines potentiellement compatibles. Corrigé pour distinguer explicitement "vérifié et absent" de "impossible à vérifier sans élévation" (verdict orange "Indéterminé")
+- **Faux "aucun volume chiffré"** : `Get-BitLockerVolume` échoue aussi sans droits administrateur ; masquer silencieusement la section aurait pu laisser croire qu'aucun volume n'est chiffré alors que le statut n'a simplement pas pu être vérifié — un risque réel avant un effacement de disque. Le rapport affiche maintenant explicitement "Statut non vérifié" dans ce cas
+
+---
+
 ## [1.5.0] - 2026-09-09
 
 ### 🐛 Corrigé

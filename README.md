@@ -27,6 +27,11 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - Marque et modèle
 - **Numéro de série**
 - **Date du BIOS** (extraction automatique)
+- **Clé de licence Windows embarquée au BIOS** (si présente — courant sur les machines OEM depuis Windows 8), utile pour une réinstallation lors de la revente
+- **Compatibilité Windows 11** (indicative) : TPM, Secure Boot, RAM, stockage — avec un verdict distinct pour "non compatible" et "indéterminé" (TPM/Secure Boot nécessitent les droits administrateur pour être vérifiés)
+
+### 🌐 Réseau
+- Adresses MAC des interfaces physiques (Ethernet/WiFi), un identifiant matériel supplémentaire utile pour le suivi d'inventaire
 
 ### ⚡ CPU
 - Marque et modèle
@@ -54,6 +59,10 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
   - **Niveau d'usure SSD** (24% used, etc.)
 - Détection fiabilisée sur plusieurs disques : le protocole SMART (SATA/NVMe) suit le bus réel de chaque disque au lieu de supposer un ordre fixe
 
+### 🔒 Chiffrement (BitLocker)
+- Statut de chiffrement par volume — savoir qu'un disque est chiffré *avant* de l'effacer évite de se retrouver bloqué sans clé de récupération
+- Nécessite les droits administrateur : sans eux, le rapport l'indique explicitement (`Statut non vérifié`) plutôt que d'afficher à tort "non chiffré"
+
 ### 🔋 Batterie
 - Nom de la batterie
 - Age approximatif (cycles)
@@ -74,14 +83,16 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 ```
 
 ### ⚙️ Paramètres
-| Paramètre    | Effet |
-|--------------|-------|
-| `-Silent`    | Ne demande pas l'élévation admin (utile pour traiter un parc de machines sans surveiller chaque poste) |
-| `-NoJson`    | N'écrit pas l'export JSON par machine |
-| `-NoCsvLog`  | N'ajoute pas de ligne au CSV consolidé |
+| Paramètre         | Effet |
+|-------------------|-------|
+| `-Silent`         | Ne demande pas l'élévation admin (utile pour traiter un parc de machines sans surveiller chaque poste) |
+| `-NoJson`         | N'écrit pas l'export JSON par machine |
+| `-NoCsvLog`       | N'ajoute pas de ligne au CSV consolidé |
+| `-AssetTag "REF"` | Optionnel — référence d'inventaire interne, ajoutée au nom de fichier, au CSV et au JSON |
 
 ```powershell
 .\CompStats.ps1 -Silent
+.\CompStats.ps1 -AssetTag "REF-1234"
 ```
 
 ### 📋 Prérequis
@@ -89,7 +100,7 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **Optionnel** : `smartctl.exe` pour les données SMART complètes (voir ci-dessous)
 
 ### 📄 Fichiers générés
-- **Rapport HTML** : `Rapports\Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.2.html` (nommage automatique, dossier créé automatiquement)
+- **Rapport HTML** : `Rapports\[RéférenceInventaire_]Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.6.html` (nommage automatique, dossier créé automatiquement ; le préfixe de référence n'apparaît que si `-AssetTag` est fourni)
 - **Export JSON** : même nom que le rapport HTML avec l'extension `.json` — toutes les données collectées, pour un traitement scripté (désactivable avec `-NoJson`)
 - **CSV consolidé** : `Rapports\resume.csv`, une ligne ajoutée à chaque exécution — pratique pour trier un lot de machines d'un coup d'œil (désactivable avec `-NoCsvLog`)
 - **Rapport batterie** : `battery-report.html` (généré à la racine du script, réutilisé s'il a moins de 24h)
@@ -141,4 +152,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.5 - Dernière modification : 2026-09-09*
+*Version 1.6 - Dernière modification : 2026-09-09*

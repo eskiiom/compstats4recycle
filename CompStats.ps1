@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.5
+# CompStats for Recycle - Version 1.6
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
@@ -9,11 +9,12 @@
 param(
     [switch]$Silent,
     [switch]$NoJson,
-    [switch]$NoCsvLog
+    [switch]$NoCsvLog,
+    [string]$AssetTag = ""
 )
 
 # Version info
-$scriptVersion = "1.5"
+$scriptVersion = "1.6"
 $scriptDate = "2026-09-09"
 
 # Check for elevated privileges (admin rights)
@@ -76,6 +77,96 @@ function Get-SystemInfo {
     } catch {
         Write-Host "Erreur lors de la lecture des informations systeme: $($_.Exception.Message)" -ForegroundColor Yellow
         return @{ Brand = "N/A"; Model = "N/A"; SerialNumber = "N/A"; BiosDate = "N/A" }
+    }
+}
+
+# Function to get the OEM Windows product key embedded in the BIOS/ACPI (MSDM table),
+# when present - common on Windows 8+ OEM machines, useful to know before a reinstall
+function Get-WindowsProductKey {
+    try {
+        $key = (Get-CimInstance -Query "SELECT OA3xOriginalProductKey FROM SoftwareLicensingService" -ErrorAction Stop).OA3xOriginalProductKey
+        if ($key) { return $key }
+    } catch { }
+    return $null
+}
+
+# Best-effort Windows 11 compatibility check: TPM 2.0, Secure Boot capability, a
+# 64-bit OS, at least 4GB RAM and 64GB of storage. This does NOT check the exact
+# CPU model against Microsoft's approved processor list - it's an indicative
+# check, not the official PC Health Check verdict.
+#
+# TpmOk/SecureBootOk are tri-state ($true/$false/$null): both underlying checks
+# require administrator rights and throw an access-denied error without them -
+# that failure means "couldn't determine" ($null), not "not present" ($false).
+# Reporting it as a hard failure would misclassify a perfectly compatible
+# machine as "Non compatible" just because the script wasn't run elevated.
+function Get-Windows11Compatibility {
+    param($ram, $hdds)
+
+    $tpmVersion = "Indetermine (necessite les droits administrateur)"
+    $tpmOk = $null
+    try {
+        $tpm = Get-CimInstance -Namespace "root/cimv2/Security/MicrosoftTpm" -ClassName Win32_Tpm -ErrorAction Stop
+        if ($tpm -and $tpm.SpecVersion) {
+            $tpmVersion = ($tpm.SpecVersion -split ',')[0].Trim()
+            $tpmOk = $tpmVersion -like "2.*"
+        } else {
+            $tpmVersion = "Non detecte"
+            $tpmOk = $false
+        }
+    } catch { }
+
+    $secureBoot = "Indetermine (necessite les droits administrateur)"
+    $secureBootOk = $null
+    try {
+        if (Confirm-SecureBootUEFI) {
+            $secureBoot = "Actif"
+        } else {
+            $secureBoot = "Supporte (UEFI) mais desactive"
+        }
+        $secureBootOk = $true
+    } catch [System.PlatformNotSupportedException] {
+        $secureBoot = "Non supporte (BIOS Legacy)"
+        $secureBootOk = $false
+    } catch { }
+
+    $is64Bit = [Environment]::Is64BitOperatingSystem
+
+    $ramGb = 0
+    if ($ram.Total -match '([\d.]+)') { $ramGb = [double]$matches[1] }
+    $ramOk = $ramGb -ge 4
+
+    $maxDiskGb = 0
+    foreach ($hdd in $hdds) {
+        if ($hdd.Size -match '([\d.]+)') {
+            $diskGb = [double]$matches[1]
+            if ($diskGb -gt $maxDiskGb) { $maxDiskGb = $diskGb }
+        }
+    }
+    $storageOk = $maxDiskGb -ge 64
+
+    if (-not $is64Bit -or -not $ramOk -or -not $storageOk -or $tpmOk -eq $false -or $secureBootOk -eq $false) {
+        $verdict = "Non compatible Windows 11"
+        $verdictClass = "health-bad"
+    } elseif ($null -eq $tpmOk -or $null -eq $secureBootOk) {
+        $verdict = "Indetermine - relancer en administrateur pour un verdict complet"
+        $verdictClass = "health-warning"
+    } else {
+        $verdict = "Compatible Windows 11"
+        $verdictClass = "health-good"
+    }
+
+    return @{
+        TpmVersion = $tpmVersion
+        TpmOk = $tpmOk
+        SecureBoot = $secureBoot
+        SecureBootOk = $secureBootOk
+        Is64Bit = $is64Bit
+        RamOk = $ramOk
+        StorageOk = $storageOk
+        Verdict = $verdict
+        VerdictClass = $verdictClass
+        Compatible = ($verdictClass -eq "health-good")
     }
 }
 
@@ -145,6 +236,25 @@ function Get-GPUInfo {
             DriverDate = $driverDate
             Resolution = $resolution
             Status = $_.Status
+        }
+    }
+    return @($results)
+}
+
+# Function to get physical network adapters' MAC addresses (Ethernet/WiFi),
+# useful as an extra hardware identifier alongside the system serial number
+function Get-NetworkInfo {
+    try {
+        $adapters = Get-CimInstance Win32_NetworkAdapter -ErrorAction Stop | Where-Object { $_.PhysicalAdapter -and $_.MACAddress }
+    } catch {
+        Write-Host "Erreur lors de la lecture des interfaces reseau: $($_.Exception.Message)" -ForegroundColor Yellow
+        return @()
+    }
+    $results = $adapters | ForEach-Object {
+        @{
+            Name = $_.Name
+            MACAddress = $_.MACAddress
+            AdapterType = $_.AdapterType
         }
     }
     return @($results)
@@ -250,6 +360,41 @@ function Get-HDDInfo {
         }
     }
     return $details
+}
+
+# Function to get BitLocker encryption status per volume. Knowing a volume is
+# encrypted BEFORE attempting a wipe/reuse avoids a technician getting stuck
+# without the recovery key.
+#
+# Get-BitLockerVolume requires administrator rights and throws an access-denied
+# error without them - that must be surfaced as "couldn't check", not silently
+# treated as "no encrypted volumes found", since acting on that false negative
+# means wiping a drive without its recovery key.
+function Get-EncryptionInfo {
+    try {
+        $volumes = Get-BitLockerVolume -ErrorAction Stop
+    } catch {
+        $status = if (Get-Command Get-BitLockerVolume -ErrorAction SilentlyContinue) {
+            "AccessDenied"
+        } else {
+            "Unavailable"
+        }
+        return @{ Status = $status; Volumes = @() }
+    }
+    $results = $volumes | ForEach-Object {
+        $protectionStatus = switch ($_.ProtectionStatus) {
+            "On" { "Chiffre" }
+            "Off" { "Non chiffre" }
+            default { "Inconnu" }
+        }
+        @{
+            MountPoint = $_.MountPoint
+            ProtectionStatus = $protectionStatus
+            EncryptionMethod = $_.EncryptionMethod
+            VolumeStatus = $_.VolumeStatus
+        }
+    }
+    return @{ Status = "OK"; Volumes = @($results) }
 }
 
 # Function to get battery information using powercfg
@@ -599,13 +744,17 @@ function Get-GlobalAssessment {
 
 # Main script execution
 $system = Get-SystemInfo
+$productKey = Get-WindowsProductKey
 $cpu = Get-CPUInfo
-# @() forces array typing even with a single GPU/disk, so downstream JSON/foreach
-# code doesn't have to special-case "one vs several"
+# @() forces array typing even with a single GPU/disk/adapter/volume, so
+# downstream JSON/foreach code doesn't have to special-case "one vs several"
 $gpus = @(Get-GPUInfo)
+$network = @(Get-NetworkInfo)
 $ram = Get-RAMInfo
 $hdds = @(Get-HDDInfo)
+$encryption = Get-EncryptionInfo
 $battery = Get-BatteryInfo
+$win11 = Get-Windows11Compatibility -ram $ram -hdds $hdds
 
 # Add SMART data to HDDs
 foreach ($hdd in $hdds) {
@@ -616,7 +765,12 @@ foreach ($hdd in $hdds) {
 $date = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $safeModel = $system.Model -replace "[\\/:*?""<>|]", "_"
 $safeSerial = $system.SerialNumber -replace "[\\/:*?""<>|]", "_"
-$filename = "$($system.Brand)_${safeModel}_${safeSerial}_${date}_CS4Rv$scriptVersion.html"
+$assetTagPrefix = ""
+if ($AssetTag) {
+    $safeAssetTag = $AssetTag -replace "[\\/:*?""<>|]", "_"
+    $assetTagPrefix = "${safeAssetTag}_"
+}
+$filename = "${assetTagPrefix}$($system.Brand)_${safeModel}_${safeSerial}_${date}_CS4Rv$scriptVersion.html"
 $reportsDir = Join-Path $PSScriptRoot "Rapports"
 if (-not (Test-Path $reportsDir)) {
     New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
@@ -792,11 +946,26 @@ $html = @"
         <div class="section">
             <h2>Syst&egrave;me</h2>
             <table>
+                $(if ($AssetTag) { "<tr><th>R&eacute;f&eacute;rence inventaire</th><td>$(ConvertTo-HtmlSafe $AssetTag)</td></tr>" })
                 <tr><th>Marque</th><td>$(ConvertTo-HtmlSafe $system.Brand)</td></tr>
                 <tr><th>Mod&egrave;le</th><td>$(ConvertTo-HtmlSafe $system.Model)</td></tr>
                 <tr><th>Num&eacute;ro de s&eacute;rie</th><td>$(ConvertTo-HtmlSafe $system.SerialNumber)</td></tr>
                 <tr><th>Derniere mise a jour BIOS</th><td>$($system.BiosDate)</td></tr>
+                <tr><th>Cl&eacute; de licence Windows (BIOS)</th><td>$(if ($productKey) { ConvertTo-HtmlSafe $productKey } else { "Non d&eacute;tect&eacute;e" })</td></tr>
             </table>
+        </div>
+
+        <div class="section">
+            <h2>Compatibilit&eacute; Windows 11</h2>
+            <table>
+                <tr><th>TPM</th><td class='$(if ($win11.TpmOk -eq $true) { "health-good" } elseif ($win11.TpmOk -eq $false) { "health-bad" } else { "health-warning" })'>$($win11.TpmVersion)</td></tr>
+                <tr><th>Secure Boot</th><td class='$(if ($win11.SecureBootOk -eq $true) { "health-good" } elseif ($win11.SecureBootOk -eq $false) { "health-bad" } else { "health-warning" })'>$($win11.SecureBoot)</td></tr>
+                <tr><th>Syst&egrave;me 64 bits</th><td class='$(if ($win11.Is64Bit) { "health-good" } else { "health-bad" })'>$(if ($win11.Is64Bit) { "Oui" } else { "Non" })</td></tr>
+                <tr><th>RAM (&ge; 4 Go)</th><td class='$(if ($win11.RamOk) { "health-good" } else { "health-bad" })'>$(if ($win11.RamOk) { "OK" } else { "Insuffisante" })</td></tr>
+                <tr><th>Stockage (&ge; 64 Go)</th><td class='$(if ($win11.StorageOk) { "health-good" } else { "health-bad" })'>$(if ($win11.StorageOk) { "OK" } else { "Insuffisant" })</td></tr>
+                <tr><th>Verdict</th><td class='$($win11.VerdictClass)'><strong>$($win11.Verdict)</strong></td></tr>
+            </table>
+            <p style="font-size: 0.85em; color: #666; margin-top: 10px;"><em>V&eacute;rification indicative (TPM, Secure Boot, RAM, stockage) - ne v&eacute;rifie pas le mod&egrave;le de CPU par rapport &agrave; la liste officielle Microsoft. Le TPM et Secure Boot ne peuvent &ecirc;tre v&eacute;rifi&eacute;s qu'en ex&eacute;cutant le script en tant qu'administrateur.</em></p>
         </div>
 
         <div class="section">
@@ -819,6 +988,14 @@ $html = @"
                 "<tr><th>R&eacute;solution actuelle</th><td>$($_.Resolution)</td></tr>"
                 "</table>"
             })
+        </div>
+
+        <div class="section">
+            <h2>R&eacute;seau</h2>
+            <table>
+                <tr><th>Interface</th><th>Adresse MAC</th></tr>
+                $($network | ForEach-Object { "<tr><td>$(ConvertTo-HtmlSafe $_.Name)</td><td>$($_.MACAddress)</td></tr>" })
+            </table>
         </div>
 
         <div class="section">
@@ -927,6 +1104,22 @@ $html = @"
             })
         </div>
 
+        $(if ($encryption.Status -eq "OK" -and $encryption.Volumes.Count -gt 0) {
+            "<div class='section'>
+            <h2>Chiffrement des volumes</h2>
+            <table>
+                <tr><th>Volume</th><th>Statut</th><th>M&eacute;thode</th></tr>
+                $($encryption.Volumes | ForEach-Object { "<tr><td>$($_.MountPoint)</td><td class='$(if ($_.ProtectionStatus -eq "Chiffre") { "health-warning" } else { "health-good" })'>$($_.ProtectionStatus)</td><td>$($_.EncryptionMethod)</td></tr>" })
+            </table>
+            <p style='font-size: 0.85em; color: #666; margin-top: 10px;'><em>Un volume chiffr&eacute; n&eacute;cessite sa cl&eacute; de r&eacute;cup&eacute;ration avant tout effacement ou r&eacute;emploi.</em></p>
+            </div>"
+        } elseif ($encryption.Status -eq "AccessDenied") {
+            "<div class='section'>
+            <h2>Chiffrement des volumes</h2>
+            <p class='info-box'>&#8505;&#65039; Statut de chiffrement <strong>non v&eacute;rifi&eacute;</strong> (n&eacute;cessite les droits administrateur) - v&eacute;rifiez manuellement (<code>manage-bde -status</code>) avant tout effacement ou r&eacute;emploi.</p>
+            </div>"
+        })
+
         <div class="section">
             <h2>Batterie</h2>
             $($batteryHtml)
@@ -963,11 +1156,16 @@ if (-not $NoJson) {
         $reportData = @{
             GeneratedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
             ScriptVersion = $scriptVersion
+            AssetTag = $AssetTag
             System = $system
+            WindowsProductKey = $productKey
+            Windows11Compatibility = $win11
             CPU = $cpu
             GPU = $gpus
+            Network = $network
             RAM = $ram
             Disks = $hdds
+            Encryption = $encryption
             Battery = $battery
             GlobalAssessment = $globalAssessment
         }
@@ -985,6 +1183,7 @@ if (-not $NoCsvLog) {
     try {
         $csvRow = [PSCustomObject]@{
             DateHeure = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            ReferenceInventaire = $AssetTag
             Marque = $system.Brand
             Modele = $system.Model
             NumeroSerie = $system.SerialNumber
@@ -995,6 +1194,8 @@ if (-not $NoCsvLog) {
             BatterieSante = if ($hasBattery) { $battery.Health } else { "N/A" }
             ScoreGlobal = $globalAssessment.Score
             Recommandation = $globalAssessment.Recommendation
+            CompatibleWin11 = $win11.Compatible
+            VolumeChiffre = if ($encryption.Status -eq "OK") { ($encryption.Volumes | Where-Object { $_.ProtectionStatus -eq "Chiffre" }).Count -gt 0 } else { "Inconnu" }
         }
         $csvRow | Export-Csv -Path $csvPath -Append -NoTypeInformation -Encoding UTF8
         Write-Host "Ligne ajoutee au resume: $csvPath"

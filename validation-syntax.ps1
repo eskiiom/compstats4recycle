@@ -46,7 +46,11 @@ $requiredFunctions = @(
     @{ Name = "Get-SMARTData"; Description = "Donnees SMART (smartctl ou fallback WMI)" },
     @{ Name = "Get-GlobalAssessment"; Description = "Score global et recommandation de recyclage" },
     @{ Name = "ConvertTo-HtmlSafe"; Description = "Encodage HTML des valeurs materielles" },
-    @{ Name = "Get-SmartNumericValue"; Description = "Extraction correcte des valeurs SMART (ATA et NVMe)" }
+    @{ Name = "Get-SmartNumericValue"; Description = "Extraction correcte des valeurs SMART (ATA et NVMe)" },
+    @{ Name = "Get-Windows11Compatibility"; Description = "Verification indicative de compatibilite Windows 11" },
+    @{ Name = "Get-WindowsProductKey"; Description = "Cle de licence Windows embarquee au BIOS" },
+    @{ Name = "Get-NetworkInfo"; Description = "Adresses MAC des interfaces reseau" },
+    @{ Name = "Get-EncryptionInfo"; Description = "Statut de chiffrement BitLocker des volumes" }
 )
 
 Write-Host "`n=== VERIFICATION DES FONCTIONS ===" -ForegroundColor Yellow
@@ -78,7 +82,9 @@ $features = @(
     @{ Pattern = "ConvertTo-Json"; Description = "Export JSON par machine" },
     @{ Pattern = "Export-Csv"; Description = "Journal CSV consolide" },
     @{ Pattern = "qwMemorySize"; Description = "VRAM precise via le registre (contourne le plafond 4GB de AdapterRAM)" },
-    @{ Pattern = "smartctlMissing"; Description = "Aide contextuelle si smartctl est absent" }
+    @{ Pattern = "smartctlMissing"; Description = "Aide contextuelle si smartctl est absent" },
+    @{ Pattern = "\[string\]\`$AssetTag"; Description = "Reference inventaire optionnelle (-AssetTag)" },
+    @{ Pattern = "AccessDenied"; Description = "Distinction chiffrement non verifie / non chiffre" }
 )
 
 $featureErrors = 0
