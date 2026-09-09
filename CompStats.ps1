@@ -1,10 +1,10 @@
 ﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.1
+# CompStats for Recycle - Version 1.3
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
-# Generates an HTML report with system, CPU, RAM, HDD (with SMART), and Battery info
+# Generates an HTML report with system, CPU, GPU, RAM, HDD (with SMART), and Battery info
 
 param(
     [switch]$Silent,
@@ -13,7 +13,7 @@ param(
 )
 
 # Version info
-$scriptVersion = "1.2"
+$scriptVersion = "1.3"
 $scriptDate = "2026-09-09"
 
 # Check for elevated privileges (admin rights)
@@ -92,6 +92,62 @@ function Get-CPUInfo {
         Write-Host "Erreur lors de la lecture des informations CPU: $($_.Exception.Message)" -ForegroundColor Yellow
         return @{ Brand = "N/A"; Model = "N/A"; Speed = "N/A" }
     }
+}
+
+# Win32_VideoController.AdapterRAM is a 32-bit field: it wraps/truncates to ~4GB
+# on GPUs with more VRAM, so read the accurate value from the driver's registry
+# key when available and fall back to AdapterRAM otherwise
+function Get-GpuVRamFromRegistry {
+    param($driverDesc)
+    $classPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+    # -ErrorAction SilentlyContinue: some subkeys can be access-denied (unrelated
+    # phantom entries, restricted ACLs) - one bad subkey must not abort the whole
+    # enumeration and hide every GPU's VRAM behind the AdapterRAM fallback
+    $subKeys = Get-ChildItem -Path $classPath -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^\d{4}$' }
+    foreach ($key in $subKeys) {
+        try {
+            $props = Get-ItemProperty -Path $key.PSPath -ErrorAction Stop
+            if ($props.DriverDesc -eq $driverDesc -and $props.'HardwareInformation.qwMemorySize') {
+                return [uint64]$props.'HardwareInformation.qwMemorySize'
+            }
+        } catch { }
+    }
+    return $null
+}
+
+# Function to get GPU information (one entry per video controller: integrated + dedicated)
+function Get-GPUInfo {
+    try {
+        $controllers = Get-CimInstance Win32_VideoController -ErrorAction Stop
+    } catch {
+        Write-Host "Erreur lors de la lecture de la carte graphique: $($_.Exception.Message)" -ForegroundColor Yellow
+        return @()
+    }
+
+    $results = $controllers | ForEach-Object {
+        $vramBytes = Get-GpuVRamFromRegistry -driverDesc $_.Name
+        if (-not $vramBytes -and $_.AdapterRAM) { $vramBytes = [uint64]$_.AdapterRAM }
+        $vram = if ($vramBytes -and $vramBytes -gt 0) { "$([math]::Round($vramBytes / 1GB, 2)) GB" } else { "N/A" }
+
+        $resolution = if ($_.CurrentHorizontalResolution -and $_.CurrentVerticalResolution) {
+            "$($_.CurrentHorizontalResolution) x $($_.CurrentVerticalResolution)"
+        } else { "N/A" }
+
+        $driverDate = "N/A"
+        if ($_.DriverDate) {
+            try { $driverDate = $_.DriverDate.ToString("dd/MM/yyyy") } catch { }
+        }
+
+        @{
+            Name = $_.Name
+            VRAM = $vram
+            DriverVersion = $_.DriverVersion
+            DriverDate = $driverDate
+            Resolution = $resolution
+            Status = $_.Status
+        }
+    }
+    return @($results)
 }
 
 # Function to get RAM information
@@ -541,9 +597,10 @@ function Get-GlobalAssessment {
 # Main script execution
 $system = Get-SystemInfo
 $cpu = Get-CPUInfo
+# @() forces array typing even with a single GPU/disk, so downstream JSON/foreach
+# code doesn't have to special-case "one vs several"
+$gpus = @(Get-GPUInfo)
 $ram = Get-RAMInfo
-# @() forces array typing even with a single disk, so downstream JSON/foreach
-# code doesn't have to special-case "one disk vs several"
 $hdds = @(Get-HDDInfo)
 $battery = Get-BatteryInfo
 
@@ -743,6 +800,19 @@ $html = @"
         </div>
 
         <div class="section">
+            <h2>Carte graphique</h2>
+            $($gpus | ForEach-Object {
+                "<table style='margin-bottom: 10px;'>"
+                "<tr><th>Mod&egrave;le</th><td>$(ConvertTo-HtmlSafe $_.Name)</td></tr>"
+                "<tr><th>M&eacute;moire vid&eacute;o</th><td>$($_.VRAM)</td></tr>"
+                "<tr><th>Version du pilote</th><td>$(ConvertTo-HtmlSafe $_.DriverVersion)</td></tr>"
+                "<tr><th>Date du pilote</th><td>$($_.DriverDate)</td></tr>"
+                "<tr><th>R&eacute;solution actuelle</th><td>$($_.Resolution)</td></tr>"
+                "</table>"
+            })
+        </div>
+
+        <div class="section">
             <h2>RAM</h2>
             <p><strong>Total:</strong> $($ram.Total) - <strong>Slots:</strong> $($ram.MaxSlots)</p>
             $(if ($ram.Integrated) {
@@ -876,6 +946,7 @@ if (-not $NoJson) {
             ScriptVersion = $scriptVersion
             System = $system
             CPU = $cpu
+            GPU = $gpus
             RAM = $ram
             Disks = $hdds
             Battery = $battery
@@ -899,6 +970,7 @@ if (-not $NoCsvLog) {
             Modele = $system.Model
             NumeroSerie = $system.SerialNumber
             CPU = $cpu.Model
+            GPU = ($gpus | ForEach-Object { $_.Name }) -join " / "
             RAM = $ram.Total
             Disques = $summaryHDDsPlain
             BatterieSante = if ($hasBattery) { $battery.Health } else { "N/A" }

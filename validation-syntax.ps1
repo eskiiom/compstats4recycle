@@ -39,6 +39,7 @@ $scriptContent = Get-Content "CompStats.ps1" -Raw
 $requiredFunctions = @(
     @{ Name = "Get-SystemInfo"; Description = "Informations systeme (marque, modele, numero de serie, date BIOS)" },
     @{ Name = "Get-CPUInfo"; Description = "Informations CPU" },
+    @{ Name = "Get-GPUInfo"; Description = "Informations carte(s) graphique(s)" },
     @{ Name = "Get-RAMInfo"; Description = "Informations RAM avec slots et modules" },
     @{ Name = "Get-HDDInfo"; Description = "Informations disques" },
     @{ Name = "Get-BatteryInfo"; Description = "Informations batterie (sante, capacite, cycles)" },
@@ -74,7 +75,8 @@ $features = @(
     @{ Pattern = "Integrated"; Description = "Detection RAM integree/soudee" },
     @{ Pattern = "SpindleSpeed"; Description = "Vitesse de rotation des disques" },
     @{ Pattern = "ConvertTo-Json"; Description = "Export JSON par machine" },
-    @{ Pattern = "Export-Csv"; Description = "Journal CSV consolide" }
+    @{ Pattern = "Export-Csv"; Description = "Journal CSV consolide" },
+    @{ Pattern = "qwMemorySize"; Description = "VRAM precise via le registre (contourne le plafond 4GB de AdapterRAM)" }
 )
 
 $featureErrors = 0

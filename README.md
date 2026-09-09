@@ -32,6 +32,13 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - Marque et modèle
 - Vitesse maximale
 
+### 🎮 Carte(s) graphique(s)
+- Une entrée par contrôleur vidéo (intégré **et** dédié sur les portables qui ont les deux)
+- Modèle, mémoire vidéo, version et date du pilote, résolution actuelle
+- **Mémoire vidéo précise** lue depuis le registre du pilote : `Win32_VideoController.AdapterRAM`
+  est un champ 32 bits qui plafonne/tronque à ~4 Go sur les GPU récents (ex. une carte 6 Go
+  s'affichait à tort comme 4 Go) — le script lit `HardwareInformation.qwMemorySize` en repli
+
 ### 💾 RAM
 - **Total et nombre de slots** (occupés/vides)
 - Détails par module : statut, marque, modèle, capacité
@@ -134,4 +141,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.2 - Dernière modification : 2026-09-09*
+*Version 1.3 - Dernière modification : 2026-09-09*

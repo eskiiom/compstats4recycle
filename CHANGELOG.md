@@ -2,6 +2,17 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.3.0] - 2026-09-09
+
+### ✨ Ajouté
+- **Section Carte graphique** : une entrée par contrôleur vidéo détecté (intégré et dédié), avec modèle, mémoire vidéo, version/date du pilote et résolution actuelle ; incluse dans le rapport HTML, l'export JSON et la colonne GPU du CSV consolidé
+- **Mémoire vidéo précise** : `Win32_VideoController.AdapterRAM` est un champ 32 bits qui plafonne/tronque à ~4 Go sur les GPU récents (une carte 6 Go remontait 4 Go) ; le script lit désormais `HardwareInformation.qwMemorySize` dans le registre du pilote en repli
+
+### 🐛 Corrigé
+- **Énumération registre robuste** : la première version de la lecture registre utilisait `-ErrorAction Stop`, ce qui faisait échouer la détection de VRAM précise pour *toutes* les cartes dès qu'une seule sous-clé était inaccessible (retour silencieux à la valeur tronquée) ; corrigé pour ignorer une sous-clé illisible sans abandonner les autres
+
+---
+
 ## [1.2.0] - 2026-09-09
 
 ### ✨ Ajouté
