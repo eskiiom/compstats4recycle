@@ -2,6 +2,14 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.5.0] - 2026-09-09
+
+### 🐛 Corrigé
+- **Température et heures d'utilisation manquantes sur NVMe** : le parsing SMART ne reconnaissait que le format ATA/SATA (`Power_On_Hours`, `Temperature_Celsius`) et pas le format NVMe (`Power On Hours:`, `Temperature:`), donc ces deux champs restaient systématiquement à "Not available" sur les disques NVMe
+- **Bug plus large sur les disques ATA/SATA** : en creusant le problème ci-dessus, découverte que le parsing des secteurs réalloués, des heures d'utilisation et du niveau d'usure SSD capturait le **numéro de l'attribut SMART** (ex. `5` pour `Reallocated_Sector_Ct`, `9` pour `Power_On_Hours`) au lieu de la vraie valeur, à cause d'une regex qui prenait le premier nombre de la ligne au lieu du dernier (RAW_VALUE). Concrètement, un disque SATA parfaitement sain pouvait être signalé à tort "Problem detected" dans le rapport, puisque la valeur "5" (l'ID d'attribut) ne vaut jamais "0". Toutes les métriques SMART (erreurs, heures, température, usure) passent maintenant par une extraction commune (`Get-SmartNumericValue`) qui distingue explicitement les lignes de tableau ATA (valeur en fin de ligne) des champs NVMe (valeur après `:`), et couvre les deux formats
+
+---
+
 ## [1.4.0] - 2026-09-09
 
 ### ✨ Ajouté

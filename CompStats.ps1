@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.4
+# CompStats for Recycle - Version 1.5
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
@@ -13,7 +13,7 @@ param(
 )
 
 # Version info
-$scriptVersion = "1.4"
+$scriptVersion = "1.5"
 $scriptDate = "2026-09-09"
 
 # Check for elevated privileges (admin rights)
@@ -385,6 +385,26 @@ function Get-BatteryInfo {
     return "No battery detected"
 }
 
+# Extract a numeric value from smartctl output for a given attribute/field name.
+# ATA attribute table rows (e.g. "  5 Reallocated_Sector_Ct  0x0033  100 100 010  Pre-fail  Always  -  0")
+# put the value we want (RAW_VALUE) at the END of the line, not the start - the
+# leading number is the attribute ID (5 here), so -Trailing must be used for those.
+# NVMe log fields (e.g. "Power On Hours:                    1,234") are simple
+# "label: value" lines where the first number after the colon IS the value.
+function Get-SmartNumericValue {
+    param($Output, [string[]]$Patterns, [switch]$Trailing)
+    foreach ($pattern in $Patterns) {
+        $match = $Output | Select-String $pattern | Select-Object -First 1
+        if (-not $match) { continue }
+        if ($Trailing) {
+            if ($match.Line.Trim() -match '(\d[\d,]*)\s*$') { return ($matches[1] -replace ',', '') }
+        } else {
+            if ($match.Line -match ':\s*(\d[\d,]*)') { return ($matches[1] -replace ',', '') }
+        }
+    }
+    return $null
+}
+
 # Function to get SMART data using smartctl.exe or WMI fallback
 function Get-SMARTData {
     param($deviceID, $busType)
@@ -437,56 +457,39 @@ function Get-SMARTData {
                 if ($output -match "Reallocated_Sector_Ct" -or $output -match "Power_On_Hours" -or $output -match "Power-On_Hours" -or $output -match "Data Units Written" -or $output -match "Percentage Used") {
                     $smartAvailable = $true
                     
-                    # Parse errors (reallocated sectors)
-                    $errors = "0"
-                    $errMatch = $output | Select-String "Reallocated_Sector_Ct"
-                    if ($errMatch) {
-                        $errLine = $errMatch.Line
-                        if ($errLine -match "(\d+)") { $errors = $matches[1] }
-                    }
-                    
-                    # Parse power-on hours (ATA format)
-                    $hours = "N/A"
-                    $hoursMatch = $output | Select-String "Power_On_Hours"
-                    if (-not $hoursMatch) { $hoursMatch = $output | Select-String "Power-On_Hours" }
-                    if ($hoursMatch) {
-                        $hoursLine = $hoursMatch.Line
-                        if ($hoursLine -match "(\d+)") { $hours = $matches[1] }
-                    }
-                    
-                    # Parse temperature - look for Current Temperature
+                    # Errors: reallocated sectors (ATA/SATA attribute table) or media/data
+                    # integrity errors (NVMe - there is no "reallocated sector" concept there)
+                    $errorsVal = Get-SmartNumericValue -Output $output -Patterns @('Reallocated_Sector_Ct') -Trailing
+                    if ($null -eq $errorsVal) { $errorsVal = Get-SmartNumericValue -Output $output -Patterns @('Media and Data Integrity Errors:') }
+                    $errors = if ($null -ne $errorsVal) { $errorsVal } else { "N/A" }
+
+                    # Power-on hours (ATA attribute table, or NVMe's own log field)
+                    $hoursVal = Get-SmartNumericValue -Output $output -Patterns @('Power_On_Hours', 'Power-On_Hours') -Trailing
+                    if ($null -eq $hoursVal) { $hoursVal = Get-SmartNumericValue -Output $output -Patterns @('^Power On Hours:') }
+                    $hours = if ($null -ne $hoursVal) { $hoursVal } else { "N/A" }
+
+                    # Temperature: smartctl's "Current Drive Temperature:" summary line (ATA) or
+                    # NVMe's own "Temperature:" log field share the same "label: value" shape
                     $temp = "N/A"
-                    $tempMatch = $output | Select-String "Current Temperature"
-                    if (-not $tempMatch) { $tempMatch = $output | Select-String "Temperature_Celsius" }
-                    if ($tempMatch) {
-                        $tempLine = $tempMatch.Line
-                        # Try to find a number in the line
-                        if ($tempLine -match "(\d+)") { 
-                            $tempVal = [int]$matches[1]
-                            # Reasonable temperature check (0-100 C)
-                            if ($tempVal -gt 0 -and $tempVal -lt 100) {
-                                $temp = $tempVal
-                            }
-                        }
+                    $tempVal = Get-SmartNumericValue -Output $output -Patterns @('Temperature:')
+                    if ($null -eq $tempVal) {
+                        # Older smartctl without that summary line: fall back to the ATA
+                        # attribute table row (RAW_VALUE, at the end of the line)
+                        $tempVal = Get-SmartNumericValue -Output $output -Patterns @('Temperature_Celsius') -Trailing
                     }
-                    
-                    # Parse wear level for SSDs
+                    if ($null -ne $tempVal -and [int]$tempVal -gt 0 -and [int]$tempVal -lt 100) {
+                        $temp = [int]$tempVal
+                    }
+
+                    # Wear level for SSDs: ATA attribute table (Samsung/Micron-style attributes)
+                    # or NVMe's own "Percentage Used:" log field
                     $wearLevel = "N/A"
-                    $wearMatch = $output | Select-String "Percent_Lifetime_Remain"
-                    if (-not $wearMatch) { $wearMatch = $output | Select-String "Wear_Leveling_Count" }
-                    if (-not $wearMatch) { $wearMatch = $output | Select-String "Percentage Used" }
-                    if ($wearMatch) {
-                        $wearLine = $wearMatch.Line
-                        if ($wearLine -match "(\d+)") { 
-                            $wearVal = [int]$matches[1]
-                            # For Percentage Used, lower is better (100% = new, 0% = worn)
-                            # For Percent_Lifetime_Remain, higher is better
-                            if ($wearLine -match "Percentage Used") {
-                                $wearLevel = "$wearVal% used"
-                            } else {
-                                $wearLevel = "$wearVal% remaining"
-                            }
-                        }
+                    $wearVal = Get-SmartNumericValue -Output $output -Patterns @('Percent_Lifetime_Remain', 'Wear_Leveling_Count') -Trailing
+                    if ($null -ne $wearVal) {
+                        $wearLevel = "$wearVal% remaining"
+                    } else {
+                        $wearVal = Get-SmartNumericValue -Output $output -Patterns @('Percentage Used')
+                        if ($null -ne $wearVal) { $wearLevel = "$wearVal% used" }
                     }
                     
                     # Parse model/serial/firmware so the report is complete even when

@@ -141,4 +141,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.4 - Dernière modification : 2026-09-09*
+*Version 1.5 - Dernière modification : 2026-09-09*

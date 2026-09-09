@@ -45,7 +45,8 @@ $requiredFunctions = @(
     @{ Name = "Get-BatteryInfo"; Description = "Informations batterie (sante, capacite, cycles)" },
     @{ Name = "Get-SMARTData"; Description = "Donnees SMART (smartctl ou fallback WMI)" },
     @{ Name = "Get-GlobalAssessment"; Description = "Score global et recommandation de recyclage" },
-    @{ Name = "ConvertTo-HtmlSafe"; Description = "Encodage HTML des valeurs materielles" }
+    @{ Name = "ConvertTo-HtmlSafe"; Description = "Encodage HTML des valeurs materielles" },
+    @{ Name = "Get-SmartNumericValue"; Description = "Extraction correcte des valeurs SMART (ATA et NVMe)" }
 )
 
 Write-Host "`n=== VERIFICATION DES FONCTIONS ===" -ForegroundColor Yellow
