@@ -2,6 +2,13 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.4.0] - 2026-09-09
+
+### ✨ Ajouté
+- **Aide contextuelle smartctl manquant** : quand au moins un disque est passé par le fallback WMI (smartctl introuvable), le rapport HTML affiche un bloc repliable (`<details>`, sans JavaScript) dans la section Disques Durs avec les 4 étapes pour installer smartmontools et obtenir des données SMART complètes. N'apparaît pas si `smartctl` a déjà pu être utilisé sur tous les disques
+
+---
+
 ## [1.3.0] - 2026-09-09
 
 ### ✨ Ajouté

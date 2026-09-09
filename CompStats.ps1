@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.3
+# CompStats for Recycle - Version 1.4
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
@@ -13,7 +13,7 @@ param(
 )
 
 # Version info
-$scriptVersion = "1.3"
+$scriptVersion = "1.4"
 $scriptDate = "2026-09-09"
 
 # Check for elevated privileges (admin rights)
@@ -654,6 +654,7 @@ $summaryModel = "$(ConvertTo-HtmlSafe $system.Model) ($(ConvertTo-HtmlSafe $syst
 $summaryHDDs = ""
 $summaryHDDsPlain = ""
 $diskStatuses = @()
+$smartctlMissing = $false
 $hddIndex = 1
 foreach ($hdd in $hdds) {
     $smart = $hdd.SMART
@@ -662,6 +663,7 @@ foreach ($hdd in $hdds) {
     $capacity = [math]::Floor([double]$capacity)
 
     if ($smart -is [hashtable]) {
+        if ($smart.Source -eq "WMI") { $smartctlMissing = $true }
         if ($smart.Errors -and $smart.Errors -ne "N/A" -and $smart.Errors -ne "0") {
             $hddStatus = "KO"
         } elseif ($smart.Temp -and $smart.Temp -ne "N/A" -and [int]$smart.Temp -gt 50) {
@@ -750,6 +752,10 @@ $html = @"
         .status-ok { background: #27ae60; color: white; }
         .status-warning { background: #f39c12; color: white; }
         .status-bad { background: #e74c3c; color: white; }
+        .info-box { background: #eaf4fb; border: 1px solid #bcdff5; border-radius: 6px; padding: 10px 15px; margin-bottom: 15px; }
+        .info-box summary { cursor: pointer; font-weight: bold; color: #2c3e50; }
+        .info-box ol { margin: 10px 0 0 20px; padding: 0; }
+        .info-box code { background: #dceefb; padding: 1px 5px; border-radius: 3px; }
     </style>
 </head>
 <body>
@@ -824,6 +830,17 @@ $html = @"
 
         <div class="section">
             <h2>Disques Durs</h2>
+            $(if ($smartctlMissing) {
+                "<details class='info-box'>
+                    <summary>&#8505;&#65039; Donn&eacute;es SMART limit&eacute;es - comment les compl&eacute;ter ?</summary>
+                    <ol>
+                        <li>T&eacute;l&eacute;charger smartmontools (version Windows, archive &laquo; without installer &raquo;) depuis <a href='https://www.smartmontools.org/wiki/Download' target='_blank' rel='noopener'>smartmontools.org</a></li>
+                        <li>Dans l'archive, r&eacute;cup&eacute;rer le fichier <code>bin\smartctl.exe</code></li>
+                        <li>Le copier dans le m&ecirc;me dossier que <code>CompStats.ps1</code></li>
+                        <li>Relancer le script (id&eacute;alement en tant qu'administrateur) pour obtenir les donn&eacute;es SMART compl&egrave;tes</li>
+                    </ol>
+                </details>"
+            })
             $($hdds | ForEach-Object {
                 $smart = $_.SMART
                 

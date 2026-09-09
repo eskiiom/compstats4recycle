@@ -76,7 +76,8 @@ $features = @(
     @{ Pattern = "SpindleSpeed"; Description = "Vitesse de rotation des disques" },
     @{ Pattern = "ConvertTo-Json"; Description = "Export JSON par machine" },
     @{ Pattern = "Export-Csv"; Description = "Journal CSV consolide" },
-    @{ Pattern = "qwMemorySize"; Description = "VRAM precise via le registre (contourne le plafond 4GB de AdapterRAM)" }
+    @{ Pattern = "qwMemorySize"; Description = "VRAM precise via le registre (contourne le plafond 4GB de AdapterRAM)" },
+    @{ Pattern = "smartctlMissing"; Description = "Aide contextuelle si smartctl est absent" }
 )
 
 $featureErrors = 0
