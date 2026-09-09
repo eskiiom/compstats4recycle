@@ -1,6 +1,6 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.0
+# CompStats for Recycle - Version 1.1
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
@@ -9,8 +9,8 @@
 param()
 
 # Version info
-$scriptVersion = "1.0"
-$scriptDate = "2026-03-16"
+$scriptVersion = "1.1"
+$scriptDate = "2026-09-09"
 
 # Check for elevated privileges (admin rights)
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -48,37 +48,52 @@ Write-Host ""
 
 # Function to get system information
 function Get-SystemInfo {
-    $cs = Get-CimInstance Win32_ComputerSystem
-    $bios = Get-CimInstance Win32_BIOS
-    
-    # Extract full BIOS date
-    $biosDate = "N/A"
-    if ($bios.ReleaseDate) {
-        $biosDate = $bios.ReleaseDate.ToString("dd/MM/yyyy")
-    }
-    
-    return @{
-        Brand = $cs.Manufacturer
-        Model = $cs.Model
-        SerialNumber = $bios.SerialNumber
-        BiosDate = $biosDate
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        $bios = Get-CimInstance Win32_BIOS -ErrorAction Stop
+
+        # Extract full BIOS date
+        $biosDate = "N/A"
+        if ($bios.ReleaseDate) {
+            $biosDate = $bios.ReleaseDate.ToString("dd/MM/yyyy")
+        }
+
+        return @{
+            Brand = $cs.Manufacturer
+            Model = $cs.Model
+            SerialNumber = $bios.SerialNumber
+            BiosDate = $biosDate
+        }
+    } catch {
+        Write-Host "Erreur lors de la lecture des informations systeme: $($_.Exception.Message)" -ForegroundColor Yellow
+        return @{ Brand = "N/A"; Model = "N/A"; SerialNumber = "N/A"; BiosDate = "N/A" }
     }
 }
 
 # Function to get CPU information
 function Get-CPUInfo {
-    $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
-    return @{
-        Brand = $cpu.Manufacturer
-        Model = $cpu.Name
-        Speed = "$($cpu.MaxClockSpeed) MHz"
+    try {
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        return @{
+            Brand = $cpu.Manufacturer
+            Model = $cpu.Name
+            Speed = "$($cpu.MaxClockSpeed) MHz"
+        }
+    } catch {
+        Write-Host "Erreur lors de la lecture des informations CPU: $($_.Exception.Message)" -ForegroundColor Yellow
+        return @{ Brand = "N/A"; Model = "N/A"; Speed = "N/A" }
     }
 }
 
 # Function to get RAM information
 function Get-RAMInfo {
-    $rams = Get-CimInstance Win32_PhysicalMemory
-    
+    try {
+        $rams = Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop
+    } catch {
+        Write-Host "Erreur lors de la lecture des informations RAM: $($_.Exception.Message)" -ForegroundColor Yellow
+        return @{ Total = "N/A"; MaxSlots = 0; Modules = @() }
+    }
+
     # Handle single object vs collection
     if ($rams -is [array]) {
         $ramCount = $rams.Count
@@ -132,12 +147,18 @@ function Get-RAMInfo {
 
 # Function to get HDD information
 function Get-HDDInfo {
-    $disks = Get-PhysicalDisk
+    try {
+        $disks = Get-PhysicalDisk -ErrorAction Stop
+    } catch {
+        Write-Host "Erreur lors de la lecture des disques: $($_.Exception.Message)" -ForegroundColor Yellow
+        return @()
+    }
     $details = $disks | ForEach-Object {
         $size = [math]::Round($_.Size / 1GB, 2)
         @{
             DeviceID = $_.DeviceID
             Type = $_.MediaType
+            BusType = $_.BusType
             Size = "$size GB"
             SMART = $null  # Will be filled later
         }
@@ -280,7 +301,7 @@ function Get-BatteryInfo {
 
 # Function to get SMART data using smartctl.exe or WMI fallback
 function Get-SMARTData {
-    param($deviceID)
+    param($deviceID, $busType)
     $smartctlPath = $null
     
     # Enable TLS 1.2 for secure downloads
@@ -315,13 +336,13 @@ function Get-SMARTData {
     
     # Try smartctl with different device types
     if ($smartctlPath) {
-        # Map device ID to Linux device names
-        # PhysicalDrive0 = /dev/sda, PhysicalDrive1 = /dev/sdb
-        $linuxDevice = if ($deviceID -eq "0") { "/dev/sda" } elseif ($deviceID -eq "1") { "/dev/sdb" } else { "/dev/sda" }
-        
-        # Try sat for SATA drives, nvme for NVMe drives
-        $deviceTypes = if ($deviceID -eq "0") { @('sat', 'ata', 'scsi') } else { @('nvme', 'ata', 'sat') }
-        
+        # Map PhysicalDriveN to smartctl's Windows device name (works for any number of disks)
+        $linuxDevice = "/dev/sd$([char](97 + [int]$deviceID))"
+
+        # Order device types by the actual bus reported by Get-PhysicalDisk instead of
+        # assuming disk 0 is SATA and everything else is NVMe
+        $deviceTypes = if ($busType -eq "NVMe") { @('nvme', 'ata', 'sat', 'scsi') } else { @('sat', 'ata', 'nvme', 'scsi') }
+
         foreach ($devType in $deviceTypes) {
             try {
                 $smartArgs = @("-d", $devType, "-a", $linuxDevice)
@@ -434,7 +455,7 @@ $battery = Get-BatteryInfo
 
 # Add SMART data to HDDs
 foreach ($hdd in $hdds) {
-    $hdd.SMART = Get-SMARTData -deviceID $hdd.DeviceID
+    $hdd.SMART = Get-SMARTData -deviceID $hdd.DeviceID -busType $hdd.BusType
 }
 
 # Generate HTML report
@@ -442,7 +463,11 @@ $date = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $safeModel = $system.Model -replace "[\\/:*?""<>|]", "_"
 $safeSerial = $system.SerialNumber -replace "[\\/:*?""<>|]", "_"
 $filename = "$($system.Brand)_${safeModel}_${safeSerial}_${date}_CS4Rv$scriptVersion.html"
-$path = Join-Path $PSScriptRoot $filename
+$reportsDir = Join-Path $PSScriptRoot "Rapports"
+if (-not (Test-Path $reportsDir)) {
+    New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
+}
+$path = Join-Path $reportsDir $filename
 
 # Prepare battery HTML
 if ($battery -is [hashtable]) {
@@ -512,7 +537,7 @@ if ($battery -is [hashtable]) {
     $summaryBattery = "N/A"
 }
 
-# HTML content with embedded Chart.js for simple charts
+# HTML content
 $html = @"
 <!DOCTYPE html>
 <html lang="fr">

@@ -2,6 +2,21 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.1.0] - 2026-09-09
+
+### 🐛 Corrigé
+- **Détection SMART multi-disques** : le mapping vers `/dev/sdX` était figé sur 2 disques et retombait sur `/dev/sda` (donc sur les données du disque 0) pour tout disque au-delà ; il est maintenant calculé dynamiquement pour n'importe quel nombre de disques
+- **Choix du protocole SMART** : l'ordre `sat`/`nvme`/`ata` supposait à tort que le disque 0 est toujours SATA et les suivants NVMe ; il suit maintenant le `BusType` réel remonté par `Get-PhysicalDisk`
+- **Encodage des accents dans le rapport HTML** : le script n'avait pas de BOM UTF-8, ce qui faisait lire ses chaînes accentuées littérales avec l'encodage ANSI système sous Windows PowerShell 5.1 (`Résumé` devenait `RÃ©sumÃ©`)
+- **Organisation des rapports** : les rapports HTML sont maintenant écrits dans `Rapports\` (créé automatiquement) au lieu de la racine du script
+
+### 🔧 Modifié
+- **Robustesse** : `Get-SystemInfo`, `Get-CPUInfo`, `Get-RAMInfo`, `Get-HDDInfo` sont protégées par `try/catch` — un échec CIM/WMI produit désormais un rapport partiel avec avertissement plutôt qu'un plantage complet
+- **Scripts de test** : `validation-syntax.ps1` réécrit pour vérifier les fonctions/fonctionnalités réellement présentes dans le script ; `test-script.ps1` (doublon obsolète testant des fonctionnalités disparues) supprimé
+- **Documentation** : README nettoyé des fonctionnalités documentées mais jamais implémentées (graphique Chart.js, RAM soudée, score de santé global, vitesse de rotation HDD, etc.)
+
+---
+
 ## [1.0.0] - 2026-03-16
 
 ### ✨ Ajouté

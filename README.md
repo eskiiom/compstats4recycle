@@ -5,15 +5,16 @@ Un script PowerShell amélioré pour générer des statistiques matérielles dé
 ## ✨ Nouvelles fonctionnalités (Version améliorée)
 
 ### 🔧 Corrections et améliorations
-- **RAM intégrée/soudée** : Meilleure détection et affichage pour les systèmes avec RAM non modulaire
-- **Données SMART étendues** : Récupération complète des informations de santé des disques (secteurs alloués, en attente, erreurs hors ligne)
+- **Données SMART** : secteurs réalloués, heures d'utilisation, température, niveau d'usure SSD
 - **Rapport de batterie amélioré** : Meilleure lecture des fichiers battery-report.html et informations supplémentaires
-- **Date de famise a jour du BIOS** : Extraction automatique de la date depuis les informations BIOS
-- **Résumé exécutif** : Aperçu rapide de l'état général avec alertes visuelles
+- **Date du BIOS** : Extraction automatique de la date depuis les informations BIOS
+- **Résumé exécutif** : Aperçu rapide de l'état général avec badges visuels
+- **Détection SMART multi-disques fiabilisée** : le mapping de périphérique et le choix du protocole (SATA/NVMe) suivent désormais le bus réel de chaque disque au lieu de supposer un ordre fixe
+- **Gestion d'erreurs** : les échecs de lecture WMI/CIM produisent un rapport partiel au lieu de faire planter le script
 
 ### 📊 Rapport HTML amélioré
 - **Mise en forme moderne** : Styles CSS améliorés avec couleurs d'état
-- **Alertes visuelles** : Boîtes d'avertissement pour problèmes critiques
+- **Badges visuels** : Statut OK / Attention / KO par composant
 - **Informations détaillées** : Plus de données SMART et meilleures descriptions
 
 ## Fonctionnalités complètes
@@ -22,30 +23,24 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 
 ### 🖥️ Système
 - Marque et modèle
-- **Date de mise a jour du BIOS** (extraction BIOS)
 - **Numéro de série**
-- **Date BIOS**
+- **Date du BIOS** (extraction automatique)
 
 ### ⚡ CPU
 - Marque et modèle
 - Vitesse maximale
 
 ### 💾 RAM
-- **Total avec détection intelligente**
-- **Support RAM intégrée/soudée**
-- Détails par module : statut, marque, modèle, capacité, **vitesse**
+- **Total et nombre de slots** (occupés/vides)
+- Détails par module : statut, marque, modèle, capacité
 
 ### 💿 Disques (SSD/HDD)
 - Type et taille
-- **Informations détaillées** : modèle, numéro de série, firmware
-- **Données SMART complètes** :
+- **Informations détaillées** : modèle, numéro de série, firmware (via le fallback WMI, quand `smartctl` ne les fournit pas)
+- **Données SMART** (via `smartctl`, avec repli WMI si indisponible) :
   - Secteurs réalloués
-  - Secteurs en attente
-  - Erreurs hors ligne
   - Heures d'utilisation
   - Température actuelle
-  - **Vitesse de rotation** (HDD) ou type SSD
-  - **Score de santé global**
   - **Niveau d'usure SSD** (24% used, etc.)
 
 ### 🔋 Batterie
@@ -53,12 +48,10 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - Age approximatif (cycles)
 - Capacité constructeur vs mesurée
 - **État de santé avec classification** (Excellent/Bon/Attention/Critique)
-- **Graphique interactif** de l'état de santé
 
 ### 📈 Résumé exécutif
-- **Analyse automatique** des problèmes critiques
-- **Alertes visuelles** pour batteries faibles ou disques défaillants
-- **Recommandations** pour le recyclage
+- **Aperçu synthétique** en tête de rapport (modèle, état des disques, état de la batterie)
+- **Badges colorés** (OK / Attention / KO) par disque et pour la batterie
 
 ## Utilisation
 
@@ -72,8 +65,8 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **Optionnel** : smartctl.exe pour les données SMART (téléchargement automatique)
 
 ### 📄 Fichiers générés
-- **Rapport principal** : `Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.0.html` (nommage automatique avec identifiant unique)
-- **Rapport batterie** : `battery-report.html` (généré automatiquement si nécessaire)
+- **Rapport principal** : `Rapports\Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.0.html` (nommage automatique avec identifiant unique, dossier créé automatiquement)
+- **Rapport batterie** : `battery-report.html` (généré à la racine du script, réutilisé s'il a moins de 24h)
 
 ### 🔧 Configuration avancée
 - Le script génère automatiquement `smartctl.exe` si nécessaire
@@ -99,11 +92,10 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **50-60°C** : Acceptable ⚠️
 - **> 60°C** : Élevé ❌
 
-### 🏷️ Classification recyclage
-Le rapport inclut un **résumé exécutif** qui classifie automatiquement :
-- **État satisfaisant** : Prêt pour réutilisation
-- **Avertissements** : Utilisation possible avec monitoring
-- **Problèmes critiques** : Recyclage recommandé
+### 🏷️ Lecture rapide
+Le résumé exécutif en tête de rapport affiche un badge par disque et pour la batterie
+(vert = OK, orange = Attention, rouge = KO) pour repérer d'un coup d'œil les composants
+à surveiller avant réemploi ou recyclage.
 
 ## Prérequis
 
@@ -121,4 +113,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.0 - Dernière modification : 2026-03-16*
+*Version 1.1 - Dernière modification : 2026-09-09*
