@@ -2,6 +2,15 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.8.0] - 2026-09-10
+
+### ✨ Ajouté
+- **Intégration continue** : workflow GitHub Actions (`.github/workflows/tests.yml`) qui exécute `validation-syntax.ps1` et la suite Pester à chaque push/pull request sur `master`, sur un runner Windows
+- **Styles d'impression** (`@media print`) : le dégradé décoratif du résumé exécutif disparaît à l'impression pour économiser l'encre, tandis que les badges de statut (OK/Attention/KO) restent forcés en couleur puisqu'ils portent l'information elle-même ; les fiches disque ne se coupent plus entre deux pages (`page-break-inside: avoid`)
+- **Purge optionnelle des rapports anciens** : `-PurgeReportsOlderThanDays N` supprime les rapports HTML/JSON plus vieux que N jours avant de générer le nouveau (désactivé par défaut) — `resume.csv` n'est jamais touché. Logique isolée dans `Remove-OldReports`, couverte par 3 nouveaux tests Pester
+
+---
+
 ## [1.7.0] - 2026-09-10
 
 ### ✨ Ajouté

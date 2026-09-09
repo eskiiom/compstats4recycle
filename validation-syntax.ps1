@@ -46,6 +46,7 @@ $requiredFunctions = @(
     @{ Name = "Get-SMARTData"; Description = "Donnees SMART (smartctl ou fallback WMI)" },
     @{ Name = "Get-GlobalAssessment"; Description = "Score global et recommandation de recyclage" },
     @{ Name = "Get-DiskHealthStatus"; Description = "Classification disque partagee entre resume et detail" },
+    @{ Name = "Remove-OldReports"; Description = "Purge des rapports anciens (optionnelle)" },
     @{ Name = "ConvertTo-HtmlSafe"; Description = "Encodage HTML des valeurs materielles" },
     @{ Name = "Get-SmartNumericValue"; Description = "Extraction correcte des valeurs SMART (ATA et NVMe)" },
     @{ Name = "Get-Windows11Compatibility"; Description = "Verification indicative de compatibilite Windows 11" },
@@ -88,7 +89,9 @@ $features = @(
     @{ Pattern = "AccessDenied"; Description = "Distinction chiffrement non verifie / non chiffre" },
     @{ Pattern = "\[int\]\`$DiskTempWarningThreshold"; Description = "Seuils d'alerte centralises et configurables" },
     @{ Pattern = "PhysicalDiskNumber"; Description = "Chiffrement rattache au disque physique concerne" },
-    @{ Pattern = "MyInvocation.InvocationName -ne '.'"; Description = "Script dot-sourceable pour les tests (sans effets de bord)" }
+    @{ Pattern = "MyInvocation.InvocationName -ne '.'"; Description = "Script dot-sourceable pour les tests (sans effets de bord)" },
+    @{ Pattern = "\[int\]\`$PurgeReportsOlderThanDays"; Description = "Purge optionnelle des rapports anciens" },
+    @{ Pattern = "@media print"; Description = "Styles CSS pour impression/export PDF" }
 )
 
 $featureErrors = 0

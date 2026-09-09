@@ -244,3 +244,48 @@ Describe "Get-EncryptionInfo" {
         }
     }
 }
+
+Describe "Remove-OldReports" {
+    It "deletes only html/json reports older than the cutoff, never the CSV log" {
+        $dir = Join-Path $TestDrive "Rapports"
+        New-Item -ItemType Directory -Path $dir | Out-Null
+
+        $oldHtml = Join-Path $dir "old.html"
+        $oldJson = Join-Path $dir "old.json"
+        $recentHtml = Join-Path $dir "recent.html"
+        $csv = Join-Path $dir "resume.csv"
+        "x" | Out-File $oldHtml
+        "x" | Out-File $oldJson
+        "x" | Out-File $recentHtml
+        "x" | Out-File $csv
+
+        (Get-Item $oldHtml).LastWriteTime = (Get-Date).AddDays(-100)
+        (Get-Item $oldJson).LastWriteTime = (Get-Date).AddDays(-100)
+        (Get-Item $recentHtml).LastWriteTime = (Get-Date).AddDays(-1)
+        (Get-Item $csv).LastWriteTime = (Get-Date).AddDays(-100)
+
+        $removed = Remove-OldReports -ReportsDir $dir -MaxAgeDays 30
+
+        $removed.Count | Should Be 2
+        Test-Path $oldHtml | Should Be $false
+        Test-Path $oldJson | Should Be $false
+        Test-Path $recentHtml | Should Be $true
+        Test-Path $csv | Should Be $true
+    }
+
+    It "deletes nothing when MaxAgeDays is 0 (disabled by default)" {
+        $dir = Join-Path $TestDrive "RapportsDisabled"
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $file = Join-Path $dir "ancient.html"
+        "x" | Out-File $file
+        (Get-Item $file).LastWriteTime = (Get-Date).AddDays(-1000)
+
+        Remove-OldReports -ReportsDir $dir -MaxAgeDays 0
+
+        Test-Path $file | Should Be $true
+    }
+
+    It "does not error when the reports folder does not exist yet" {
+        { Remove-OldReports -ReportsDir (Join-Path $TestDrive "DoesNotExist") -MaxAgeDays 30 } | Should Not Throw
+    }
+}

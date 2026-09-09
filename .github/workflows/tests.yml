@@ -1,0 +1,30 @@
+name: Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validation syntaxique
+        shell: powershell
+        run: .\validation-syntax.ps1
+
+      - name: Tests Pester
+        shell: powershell
+        run: |
+          # Windows PowerShell ships Pester 3.4.0; CompStats.Tests.ps1 uses its
+          # "Should Be" syntax (removed in Pester 5), so pin this version even
+          # if a newer Pester is also present on the runner image.
+          Import-Module Pester -RequiredVersion 3.4.0 -Force
+          $result = Invoke-Pester -Script .\CompStats.Tests.ps1 -PassThru
+          if ($result.FailedCount -gt 0) {
+            Write-Error "$($result.FailedCount) test(s) Pester en echec"
+            exit 1
+          }

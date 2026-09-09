@@ -1,5 +1,7 @@
 # CompStats for Recycle
 
+![Tests](https://github.com/eskiiom/compstats4recycle/actions/workflows/tests.yml/badge.svg)
+
 Un script PowerShell amélioré pour générer des statistiques matérielles détaillées sur les ordinateurs utilisés avant recyclage.
 
 ## ✨ Nouvelles fonctionnalités (Version améliorée)
@@ -17,11 +19,14 @@ Un script PowerShell amélioré pour générer des statistiques matérielles dé
 - **Chiffrement rattaché au disque physique** : le statut BitLocker apparaît directement sur la fiche du disque concerné plutôt que dans une liste séparée à corréler soi-même
 - **Cohérence linguistique** : le rapport est entièrement en français (plusieurs statuts internes restaient en anglais)
 - **Suite de tests Pester** : les fonctions de calcul (parsing SMART, classification des disques, score global, etc.) sont couvertes par des tests automatisés
+- **Intégration continue** : les tests tournent automatiquement sur GitHub Actions à chaque push/pull request
+- **Purge optionnelle des rapports anciens** : `-PurgeReportsOlderThanDays` pour ne pas laisser le dossier `Rapports\` grossir indéfiniment
 
 ### 📊 Rapport HTML amélioré
 - **Mise en forme moderne** : Styles CSS améliorés avec couleurs d'état
 - **Badges visuels** : Statut OK / Attention / KO par composant
 - **Informations détaillées** : Plus de données SMART et meilleures descriptions
+- **Impression/export PDF soignés** : styles dédiés (`@media print`) — le dégradé décoratif du résumé disparaît à l'impression (économie d'encre) tandis que les badges de statut, eux, restent en couleur (l'information qu'ils portent ne doit pas disparaître), et les fiches disque ne se coupent pas entre deux pages
 
 ## Fonctionnalités complètes
 
@@ -100,11 +105,13 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 | `-DiskTempWarningThreshold`   | Température disque (°C) à partir de laquelle un disque passe en "Attention" (défaut 50) |
 | `-ScoreGoodThreshold`         | Score global à partir duquel la machine est "Bon état" (défaut 80) |
 | `-ScoreWarningThreshold`      | Score global à partir duquel la machine est "Attention" plutôt que "Critique" (défaut 50) |
+| `-PurgeReportsOlderThanDays`  | Supprime les rapports HTML/JSON (jamais `resume.csv`) plus vieux que N jours avant de générer le nouveau ; désactivé par défaut (0) |
 
 ```powershell
 .\CompStats.ps1 -Silent
 .\CompStats.ps1 -AssetTag "REF-1234"
 .\CompStats.ps1 -DiskTempWarningThreshold 45 -BatteryCriticalThreshold 30
+.\CompStats.ps1 -PurgeReportsOlderThanDays 90
 ```
 
 ### 📋 Prérequis
@@ -112,7 +119,7 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 - **Optionnel** : `smartctl.exe` pour les données SMART complètes (voir ci-dessous)
 
 ### 📄 Fichiers générés
-- **Rapport HTML** : `Rapports\[RéférenceInventaire_]Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.7.html` (nommage automatique, dossier créé automatiquement ; le préfixe de référence n'apparaît que si `-AssetTag` est fourni)
+- **Rapport HTML** : `Rapports\[RéférenceInventaire_]Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.8.html` (nommage automatique, dossier créé automatiquement ; le préfixe de référence n'apparaît que si `-AssetTag` est fourni)
 - **Export JSON** : même nom que le rapport HTML avec l'extension `.json` — toutes les données collectées, pour un traitement scripté (désactivable avec `-NoJson`)
 - **CSV consolidé** : `Rapports\resume.csv`, une ligne ajoutée à chaque exécution — pratique pour trier un lot de machines d'un coup d'œil (désactivable avec `-NoCsvLog`)
 - **Rapport batterie** : `battery-report.html` (généré à la racine du script, réutilisé s'il a moins de 24h)
@@ -175,4 +182,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.7 - Dernière modification : 2026-09-10*
+*Version 1.8 - Dernière modification : 2026-09-10*

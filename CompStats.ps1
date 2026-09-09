@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 
-# CompStats for Recycle - Version 1.7
+# CompStats for Recycle - Version 1.8
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 #
@@ -16,11 +16,12 @@ param(
     [int]$BatteryCriticalThreshold = 40,
     [int]$DiskTempWarningThreshold = 50,
     [int]$ScoreGoodThreshold = 80,
-    [int]$ScoreWarningThreshold = 50
+    [int]$ScoreWarningThreshold = 50,
+    [int]$PurgeReportsOlderThanDays = 0
 )
 
 # Version info
-$scriptVersion = "1.7"
+$scriptVersion = "1.8"
 $scriptDate = "2026-09-10"
 
 # Everything in this block only runs when the script is executed directly
@@ -737,6 +738,27 @@ function ConvertTo-HtmlSafe {
     [System.Net.WebUtility]::HtmlEncode([string]$Value)
 }
 
+# Delete HTML/JSON reports older than MaxAgeDays from the reports folder.
+# Off by default (MaxAgeDays 0) since deleting files is destructive; opt in
+# with -PurgeReportsOlderThanDays. Never touches resume.csv (the running log)
+# or anything outside the reports folder.
+function Remove-OldReports {
+    param($ReportsDir, [int]$MaxAgeDays)
+    $removed = @()
+    if ($MaxAgeDays -le 0 -or -not (Test-Path $ReportsDir)) { return $removed }
+
+    $cutoff = (Get-Date).AddDays(-$MaxAgeDays)
+    Get-ChildItem -Path $ReportsDir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in ".html", ".json" -and $_.LastWriteTime -lt $cutoff } |
+        ForEach-Object {
+            try {
+                Remove-Item $_.FullName -Force -ErrorAction Stop
+                $removed += $_.Name
+            } catch { }
+        }
+    return $removed
+}
+
 # Classify a disk's overall health from its SMART data. Used both for the
 # summary badge and the detailed per-disk table so the two always agree - they
 # used to be computed independently and could disagree (a merely hot but
@@ -864,6 +886,12 @@ $reportsDir = Join-Path $PSScriptRoot "Rapports"
 if (-not (Test-Path $reportsDir)) {
     New-Item -ItemType Directory -Path $reportsDir -Force | Out-Null
 }
+
+if ($PurgeReportsOlderThanDays -gt 0) {
+    $purged = Remove-OldReports -ReportsDir $reportsDir -MaxAgeDays $PurgeReportsOlderThanDays
+    foreach ($name in $purged) { Write-Host "Rapport ancien supprime ($PurgeReportsOlderThanDays+ jours): $name" -ForegroundColor Yellow }
+}
+
 $path = Join-Path $reportsDir $filename
 
 # Prepare battery HTML
@@ -1001,6 +1029,24 @@ $html = @"
         .info-box summary { cursor: pointer; font-weight: bold; color: #2c3e50; }
         .info-box ol { margin: 10px 0 0 20px; padding: 0; }
         .info-box code { background: #dceefb; padding: 1px 5px; border-radius: 3px; }
+
+        @media print {
+            body { background: white; }
+            .container { box-shadow: none; max-width: 100%; }
+            .summary-card {
+                background: white; color: #333; border: 2px solid #667eea; box-shadow: none;
+            }
+            .summary-card h2, .summary-label { color: #333; }
+            .summary-item { background: #f4f4f4; }
+            /* Force badge background colors to print - they're the actual
+               information (OK/Attention/KO), not decoration, and browsers
+               strip background colors from print output by default */
+            .status-ok, .status-warning, .status-bad {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .section, .disk-card, details { page-break-inside: avoid; }
+        }
     </style>
 </head>
 <body>
@@ -1120,7 +1166,7 @@ $html = @"
 
                 $rpmDisplay = if ($_.SpindleSpeed -and [int]$_.SpindleSpeed -gt 0) { "$($_.SpindleSpeed) RPM" } elseif ($_.Type -eq "SSD") { "Non applicable (SSD)" } else { "Non disponible" }
 
-                "<div style='margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; border-radius: 5px;'>"
+                "<div class='disk-card' style='margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; border-radius: 5px;'>"
                 "<table>"
                 "<tr><th>Type</th><td>$($_.Type)</td></tr>"
                 "<tr><th>Taille</th><td>$($_.Size)</td></tr>"
