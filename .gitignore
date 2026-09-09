@@ -1,5 +1,7 @@
-# Ignore generated HTML reports
+# Ignore generated reports (contain hardware serial numbers)
 *.html
+*.json
+Rapports/resume.csv
 
 # Ignore smartctl.exe if downloaded
 smartctl.exe

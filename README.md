@@ -5,12 +5,14 @@ Un script PowerShell amélioré pour générer des statistiques matérielles dé
 ## ✨ Nouvelles fonctionnalités (Version améliorée)
 
 ### 🔧 Corrections et améliorations
-- **Données SMART** : secteurs réalloués, heures d'utilisation, température, niveau d'usure SSD
+- **Données SMART** : secteurs réalloués, heures d'utilisation, température, niveau d'usure SSD, modèle/série/firmware
 - **Rapport de batterie amélioré** : Meilleure lecture des fichiers battery-report.html et informations supplémentaires
 - **Date du BIOS** : Extraction automatique de la date depuis les informations BIOS
-- **Résumé exécutif** : Aperçu rapide de l'état général avec badges visuels
+- **Résumé exécutif** : Aperçu rapide de l'état général avec badges visuels et score global
 - **Détection SMART multi-disques fiabilisée** : le mapping de périphérique et le choix du protocole (SATA/NVMe) suivent désormais le bus réel de chaque disque au lieu de supposer un ordre fixe
 - **Gestion d'erreurs** : les échecs de lecture WMI/CIM produisent un rapport partiel au lieu de faire planter le script
+- **Mode `-Silent`** : traitement d'un parc de machines sans prompt d'élévation à chaque poste
+- **Exports JSON et CSV** : en plus du HTML, pour un traitement scripté ou le tri d'un lot de machines
 
 ### 📊 Rapport HTML amélioré
 - **Mise en forme moderne** : Styles CSS améliorés avec couleurs d'état
@@ -33,15 +35,17 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 ### 💾 RAM
 - **Total et nombre de slots** (occupés/vides)
 - Détails par module : statut, marque, modèle, capacité
+- **Détection RAM intégrée/soudée** : si aucun module n'est visible via SMBIOS (fréquent sur les portables récents), le rapport l'indique explicitement au lieu d'afficher un tableau vide
 
 ### 💿 Disques (SSD/HDD)
-- Type et taille
-- **Informations détaillées** : modèle, numéro de série, firmware (via le fallback WMI, quand `smartctl` ne les fournit pas)
+- Type, taille et **vitesse de rotation** (RPM pour un HDD, "N/A (SSD)" sinon)
+- **Informations détaillées** : modèle, numéro de série, firmware (via `smartctl` ou, à défaut, le fallback WMI)
 - **Données SMART** (via `smartctl`, avec repli WMI si indisponible) :
   - Secteurs réalloués
   - Heures d'utilisation
   - Température actuelle
   - **Niveau d'usure SSD** (24% used, etc.)
+- Détection fiabilisée sur plusieurs disques : le protocole SMART (SATA/NVMe) suit le bus réel de chaque disque au lieu de supposer un ordre fixe
 
 ### 🔋 Batterie
 - Nom de la batterie
@@ -52,6 +56,8 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 ### 📈 Résumé exécutif
 - **Aperçu synthétique** en tête de rapport (modèle, état des disques, état de la batterie)
 - **Badges colorés** (OK / Attention / KO) par disque et pour la batterie
+- **Score global sur 100** agrégeant disques et batterie, avec une recommandation
+  (Réemploi possible / Vérifier avant réemploi / Recyclage recommandé)
 
 ## Utilisation
 
@@ -60,16 +66,29 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 .\CompStats.ps1
 ```
 
+### ⚙️ Paramètres
+| Paramètre    | Effet |
+|--------------|-------|
+| `-Silent`    | Ne demande pas l'élévation admin (utile pour traiter un parc de machines sans surveiller chaque poste) |
+| `-NoJson`    | N'écrit pas l'export JSON par machine |
+| `-NoCsvLog`  | N'ajoute pas de ligne au CSV consolidé |
+
+```powershell
+.\CompStats.ps1 -Silent
+```
+
 ### 📋 Prérequis
 - Windows avec PowerShell 5.1+
-- **Optionnel** : smartctl.exe pour les données SMART (téléchargement automatique)
+- **Optionnel** : `smartctl.exe` pour les données SMART complètes (voir ci-dessous)
 
 ### 📄 Fichiers générés
-- **Rapport principal** : `Rapports\Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.0.html` (nommage automatique avec identifiant unique, dossier créé automatiquement)
+- **Rapport HTML** : `Rapports\Marque_Modele_NumeroSerie_YYYY-MM-DD_CS4Rv1.2.html` (nommage automatique, dossier créé automatiquement)
+- **Export JSON** : même nom que le rapport HTML avec l'extension `.json` — toutes les données collectées, pour un traitement scripté (désactivable avec `-NoJson`)
+- **CSV consolidé** : `Rapports\resume.csv`, une ligne ajoutée à chaque exécution — pratique pour trier un lot de machines d'un coup d'œil (désactivable avec `-NoCsvLog`)
 - **Rapport batterie** : `battery-report.html` (généré à la racine du script, réutilisé s'il a moins de 24h)
 
 ### 🔧 Configuration avancée
-- Le script génère automatiquement `smartctl.exe` si nécessaire
+- `smartctl.exe` n'est **pas** téléchargé automatiquement (le script ne télécharge et n'exécute aucun binaire externe). Pour des données SMART complètes, placez `smartctl.exe` à côté du script ou installez [smartmontools](https://www.smartmontools.org/) — sans lui, le script utilise un repli WMI (données plus limitées mais fonctionnel)
 - Copiez `battery-report.html` existant pour éviter la regeneration
 - Modifiez les seuils d'alerte dans le script si besoin
 
@@ -94,8 +113,10 @@ Le script collecte et génère un rapport HTML avec les informations suivantes :
 
 ### 🏷️ Lecture rapide
 Le résumé exécutif en tête de rapport affiche un badge par disque et pour la batterie
-(vert = OK, orange = Attention, rouge = KO) pour repérer d'un coup d'œil les composants
-à surveiller avant réemploi ou recyclage.
+(vert = OK, orange = Attention, rouge = KO), ainsi qu'un score global sur 100 :
+- **≥ 80** : Bon état — Réemploi possible ✅
+- **50-79** : Attention — Vérifier avant réemploi ⚠️
+- **< 50** : Critique — Recyclage recommandé ❌
 
 ## Prérequis
 
@@ -113,4 +134,4 @@ Libre d'utilisation pour le recyclage d'ordinateurs.
 
 ---
 
-*Version 1.1 - Dernière modification : 2026-09-09*
+*Version 1.2 - Dernière modification : 2026-09-09*

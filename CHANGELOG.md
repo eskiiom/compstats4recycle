@@ -2,6 +2,26 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.2.0] - 2026-09-09
+
+### ✨ Ajouté
+- **Score global de recyclage** (0-100) agrégeant l'état des disques et de la batterie, avec une recommandation (Réemploi possible / Vérifier avant réemploi / Recyclage recommandé), affiché dans le résumé exécutif du rapport
+- **Détection de la RAM intégrée/soudée** : quand `Win32_PhysicalMemory` ne remonte aucun module (fréquent sur les portables récents), le rapport l'indique explicitement au lieu d'afficher un tableau vide ou un total à 0 GB
+- **Vitesse de rotation des disques** (RPM) affichée pour les HDD, "N/A (SSD)" pour les SSD
+- **Modèle/série/firmware des disques** désormais récupérés aussi via `smartctl` (pas seulement le fallback WMI), pour un rapport homogène quel que soit le chemin de collecte
+- **Export JSON par machine** (même nom que le rapport HTML, extension `.json`) pour un traitement scripté ; désactivable avec `-NoJson`
+- **CSV consolidé** (`Rapports\resume.csv`, une ligne ajoutée par exécution) pour trier un lot de machines d'un coup d'œil ; désactivable avec `-NoCsvLog`
+- **Mode `-Silent`** : saute le prompt d'élévation admin interactif, pour traiter un parc de machines sans surveiller chaque poste
+
+### 🐛 Corrigé
+- **Encodage HTML des valeurs matérielles** : marque/modèle/numéro de série système, CPU, RAM et disques sont maintenant échappés avant insertion dans le rapport (un caractère `<` ou `&` dans un firmware ou un numéro de série ne casse plus le rendu)
+- **Tableau de disques toujours cohérent** : une machine à un seul disque ne produisait pas un tableau à un élément mais un objet isolé côté JSON (artefact du dépliage automatique des tableaux à un élément par PowerShell) ; corrigé en forçant le typage tableau à l'appel de `Get-HDDInfo`
+
+### 🔧 Modifié
+- Suppression du code mort qui activait TLS 1.2 pour un téléchargement automatique de `smartctl.exe` qui n'a jamais existé ; le script n'a jamais téléchargé ni exécuté de binaire externe. Le README a été corrigé en conséquence et pointe vers une installation manuelle (smartmontools)
+
+---
+
 ## [1.1.0] - 2026-09-09
 
 ### 🐛 Corrigé

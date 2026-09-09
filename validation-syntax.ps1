@@ -42,7 +42,9 @@ $requiredFunctions = @(
     @{ Name = "Get-RAMInfo"; Description = "Informations RAM avec slots et modules" },
     @{ Name = "Get-HDDInfo"; Description = "Informations disques" },
     @{ Name = "Get-BatteryInfo"; Description = "Informations batterie (sante, capacite, cycles)" },
-    @{ Name = "Get-SMARTData"; Description = "Donnees SMART (smartctl ou fallback WMI)" }
+    @{ Name = "Get-SMARTData"; Description = "Donnees SMART (smartctl ou fallback WMI)" },
+    @{ Name = "Get-GlobalAssessment"; Description = "Score global et recommandation de recyclage" },
+    @{ Name = "ConvertTo-HtmlSafe"; Description = "Encodage HTML des valeurs materielles" }
 )
 
 Write-Host "`n=== VERIFICATION DES FONCTIONS ===" -ForegroundColor Yellow
@@ -65,7 +67,14 @@ $features = @(
     @{ Pattern = "HealthValue"; Description = "Valeur numerique de sante batterie" },
     @{ Pattern = "WearLevel"; Description = "Niveau d'usure SSD" },
     @{ Pattern = "summary-card"; Description = "Resume executif dans le rapport" },
-    @{ Pattern = "\`$reportsDir"; Description = "Sortie des rapports dans le dossier Rapports/" }
+    @{ Pattern = "\`$reportsDir"; Description = "Sortie des rapports dans le dossier Rapports/" },
+    @{ Pattern = "\[switch\]\`$Silent"; Description = "Mode -Silent (execution non-interactive)" },
+    @{ Pattern = "\[switch\]\`$NoJson"; Description = "Export JSON (option -NoJson pour desactiver)" },
+    @{ Pattern = "\[switch\]\`$NoCsvLog"; Description = "Journal CSV consolide (option -NoCsvLog pour desactiver)" },
+    @{ Pattern = "Integrated"; Description = "Detection RAM integree/soudee" },
+    @{ Pattern = "SpindleSpeed"; Description = "Vitesse de rotation des disques" },
+    @{ Pattern = "ConvertTo-Json"; Description = "Export JSON par machine" },
+    @{ Pattern = "Export-Csv"; Description = "Journal CSV consolide" }
 )
 
 $featureErrors = 0

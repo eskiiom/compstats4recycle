@@ -6,10 +6,14 @@
 #
 # Generates an HTML report with system, CPU, RAM, HDD (with SMART), and Battery info
 
-param()
+param(
+    [switch]$Silent,
+    [switch]$NoJson,
+    [switch]$NoCsvLog
+)
 
 # Version info
-$scriptVersion = "1.1"
+$scriptVersion = "1.2"
 $scriptDate = "2026-09-09"
 
 # Check for elevated privileges (admin rights)
@@ -22,14 +26,19 @@ if (-not $isAdmin) {
     Write-Host "======================================" -ForegroundColor Yellow
     Write-Host "smartctl necessite des privileges eleves pour fonctionner correctement." -ForegroundColor Yellow
     Write-Host ""
-    $response = Read-Host "Voulez-vous redemarrer le script en mode administrateur? (O/N)"
-    if ($response -eq "O" -or $response -eq "o") {
-        Write-Host "Redemarrage en cours..." -ForegroundColor Green
-        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-        exit
-    } else {
-        Write-Host "Le script continuera sans les donnees SMART complete." -ForegroundColor Yellow
+    if ($Silent) {
+        Write-Host "Mode -Silent : poursuite sans elevation (donnees SMART limitees au fallback WMI)." -ForegroundColor Yellow
         Write-Host ""
+    } else {
+        $response = Read-Host "Voulez-vous redemarrer le script en mode administrateur? (O/N)"
+        if ($response -eq "O" -or $response -eq "o") {
+            Write-Host "Redemarrage en cours..." -ForegroundColor Green
+            Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+            exit
+        } else {
+            Write-Host "Le script continuera sans les donnees SMART complete." -ForegroundColor Yellow
+            Write-Host ""
+        }
     }
 }
 
@@ -94,13 +103,29 @@ function Get-RAMInfo {
         return @{ Total = "N/A"; MaxSlots = 0; Modules = @() }
     }
 
+    # No SMBIOS memory module info at all: typical of soldered/integrated RAM
+    # that Win32_PhysicalMemory can't enumerate on some modern laptops
+    if (-not $rams -or ($rams -is [array] -and $rams.Count -eq 0)) {
+        $totalGb = 0
+        try {
+            $csTotal = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory
+            $totalGb = [math]::Round($csTotal / 1GB, 2)
+        } catch { }
+        return @{
+            Total = "$totalGb GB"
+            MaxSlots = 0
+            Modules = @()
+            Integrated = $true
+        }
+    }
+
     # Handle single object vs collection
     if ($rams -is [array]) {
         $ramCount = $rams.Count
     } else {
         $ramCount = 1
     }
-    
+
     $total = ($rams | Measure-Object -Property Capacity -Sum).Sum / 1GB
     
     # Try to get memory device slots - use a more reliable method
@@ -142,6 +167,7 @@ function Get-RAMInfo {
         Total = "$([math]::Round($total, 2)) GB"
         MaxSlots = $maxSlots
         Modules = $details
+        Integrated = $false
     }
 }
 
@@ -155,11 +181,15 @@ function Get-HDDInfo {
     }
     $details = $disks | ForEach-Object {
         $size = [math]::Round($_.Size / 1GB, 2)
+        # SpindleSpeed is in RPM for HDDs; 0 (or absent) on SSDs
+        $rpm = $null
+        try { $rpm = $_.SpindleSpeed } catch { }
         @{
             DeviceID = $_.DeviceID
             Type = $_.MediaType
             BusType = $_.BusType
             Size = "$size GB"
+            SpindleSpeed = $rpm
             SMART = $null  # Will be filled later
         }
     }
@@ -303,10 +333,7 @@ function Get-BatteryInfo {
 function Get-SMARTData {
     param($deviceID, $busType)
     $smartctlPath = $null
-    
-    # Enable TLS 1.2 for secure downloads
-    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
-    
+
     # Check if smartctl is in script directory
     $smartctl = Join-Path $PSScriptRoot "smartctl.exe"
     if (Test-Path $smartctl) {
@@ -326,7 +353,9 @@ function Get-SMARTData {
                 $cmd = Get-Command smartctl -ErrorAction Stop
                 $smartctlPath = $cmd.Source
             } catch {
-                Write-Host "smartctl not found, using WMI fallback"
+                Write-Host "smartctl introuvable, utilisation du fallback WMI (donnees SMART limitees)." -ForegroundColor Yellow
+                Write-Host "Pour des donnees SMART completes : placez smartctl.exe a cote du script," -ForegroundColor Yellow
+                Write-Host "ou installez smartmontools (https://www.smartmontools.org/)." -ForegroundColor Yellow
             }
         }
     }
@@ -404,12 +433,29 @@ function Get-SMARTData {
                         }
                     }
                     
+                    # Parse model/serial/firmware so the report is complete even when
+                    # smartctl (not just the WMI fallback) is the data source
+                    $model = $null
+                    $modelMatch = $output | Select-String "Device Model:|Model Number:"
+                    if ($modelMatch) { $model = ($modelMatch.Line -replace '^(Device Model:|Model Number:)\s*', '').Trim() }
+
+                    $serial = $null
+                    $serialMatch = $output | Select-String "Serial Number:"
+                    if ($serialMatch) { $serial = ($serialMatch.Line -replace '^Serial Number:\s*', '').Trim() }
+
+                    $firmware = $null
+                    $firmwareMatch = $output | Select-String "Firmware Version:"
+                    if ($firmwareMatch) { $firmware = ($firmwareMatch.Line -replace '^Firmware Version:\s*', '').Trim() }
+
                     $smartData = @{
                         Errors = $errors
                         Hours = $hours
                         Temp = $temp
                         Source = "smartctl"
                         WearLevel = $wearLevel
+                        Model = $model
+                        Serial = $serial
+                        Firmware = $firmware
                     }
                 }
             } catch { }
@@ -446,11 +492,59 @@ function Get-SMARTData {
     return $smartData
 }
 
+# HTML-encode a value coming from hardware/vendor strings (WMI, smartctl) before
+# embedding it in the report, in case it contains characters like < or &
+function ConvertTo-HtmlSafe {
+    param($Value)
+    if ($null -eq $Value) { return "" }
+    [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+# Aggregate disk and battery status into a single recycling recommendation
+function Get-GlobalAssessment {
+    param($diskStatuses, $hasBattery, $batteryHealthValue)
+
+    $score = 100
+    foreach ($status in $diskStatuses) {
+        if ($status -eq "KO") { $score -= 35 }
+        elseif ($status -eq "Attention") { $score -= 12 }
+    }
+    if ($hasBattery) {
+        if ($batteryHealthValue -lt 40) { $score -= 35 }
+        elseif ($batteryHealthValue -lt 60) { $score -= 20 }
+        elseif ($batteryHealthValue -lt 80) { $score -= 8 }
+    }
+    $score = [Math]::Max(0, [Math]::Min(100, $score))
+
+    if ($score -ge 80) {
+        $label = "Bon etat"
+        $recommendation = "Reemploi possible"
+        $badgeClass = "status-ok"
+    } elseif ($score -ge 50) {
+        $label = "Attention"
+        $recommendation = "Verifier avant reemploi"
+        $badgeClass = "status-warning"
+    } else {
+        $label = "Critique"
+        $recommendation = "Recyclage recommande"
+        $badgeClass = "status-bad"
+    }
+
+    return @{
+        Score = $score
+        Label = $label
+        Recommendation = $recommendation
+        BadgeClass = $badgeClass
+    }
+}
+
 # Main script execution
 $system = Get-SystemInfo
 $cpu = Get-CPUInfo
 $ram = Get-RAMInfo
-$hdds = Get-HDDInfo
+# @() forces array typing even with a single disk, so downstream JSON/foreach
+# code doesn't have to special-case "one disk vs several"
+$hdds = @(Get-HDDInfo)
 $battery = Get-BatteryInfo
 
 # Add SMART data to HDDs
@@ -499,15 +593,17 @@ if ($battery -is [hashtable]) {
 }
 
 # Prepare health summary
-$summaryModel = "$($system.Model) ($($system.SerialNumber))"
+$summaryModel = "$(ConvertTo-HtmlSafe $system.Model) ($(ConvertTo-HtmlSafe $system.SerialNumber))"
 $summaryHDDs = ""
+$summaryHDDsPlain = ""
+$diskStatuses = @()
 $hddIndex = 1
 foreach ($hdd in $hdds) {
     $smart = $hdd.SMART
     $hddStatus = "OK"
     $capacity = $hdd.Size -replace " GB$", ""
     $capacity = [math]::Floor([double]$capacity)
-    
+
     if ($smart -is [hashtable]) {
         if ($smart.Errors -and $smart.Errors -ne "N/A" -and $smart.Errors -ne "0") {
             $hddStatus = "KO"
@@ -517,15 +613,19 @@ foreach ($hdd in $hdds) {
             $hddStatus = "Attention"
         }
     }
-    if ($hddIndex -gt 1) { $summaryHDDs += " | " }
+    $diskStatuses += $hddStatus
+    if ($hddIndex -gt 1) { $summaryHDDs += " | "; $summaryHDDsPlain += " | " }
     $statusBadge = if ($hddStatus -eq "OK") { "status-ok" } elseif ($hddStatus -eq "Attention") { "status-warning" } else { "status-bad" }
     $summaryHDDs += "HDD $hddIndex ${capacity}GB : <span class='status-badge $statusBadge'>$hddStatus</span>"
+    $summaryHDDsPlain += "HDD $hddIndex ${capacity}GB : $hddStatus"
     $hddIndex++
 }
 
 # Battery summary with color
-if ($battery -is [hashtable]) {
+$hasBattery = $battery -is [hashtable]
+if ($hasBattery) {
     $batHealth = $battery.Health
+    $batHealthValue = $battery.HealthValue
     $batBadge = "status-ok"
     if ($batHealth -match '(\d+)') {
         $h = [int]$matches[1]
@@ -534,8 +634,11 @@ if ($battery -is [hashtable]) {
     }
     $summaryBattery = "<span class='status-badge $batBadge'>$batHealth</span> ($($battery.BatteryLifeFull))"
 } else {
+    $batHealthValue = 100
     $summaryBattery = "N/A"
 }
+
+$globalAssessment = Get-GlobalAssessment -diskStatuses $diskStatuses -hasBattery $hasBattery -batteryHealthValue $batHealthValue
 
 # HTML content
 $html = @"
@@ -598,8 +701,12 @@ $html = @"
         <p><strong>Date de génération:</strong> $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")</p>
 
         <div class="summary-card">
-            <h2>Résumé deSanté</h2>
+            <h2>Résumé de Santé</h2>
             <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-label">État global</div>
+                    <div class="summary-value"><span class='status-badge $($globalAssessment.BadgeClass)'>$($globalAssessment.Score)/100 - $($globalAssessment.Label)</span></div>
+                </div>
                 <div class="summary-item">
                     <div class="summary-label">Modèle</div>
                     <div class="summary-value">$summaryModel</div>
@@ -613,14 +720,15 @@ $html = @"
                     <div class="summary-value">$summaryBattery</div>
                 </div>
             </div>
+            <p style="margin-top: 15px; margin-bottom: 0;"><strong>Recommandation :</strong> $($globalAssessment.Recommendation)</p>
         </div>
 
         <div class="section">
             <h2>Syst&egrave;me</h2>
             <table>
-                <tr><th>Marque</th><td>$($system.Brand)</td></tr>
-                <tr><th>Mod&egrave;le</th><td>$($system.Model)</td></tr>
-                <tr><th>Num&eacute;ro de s&eacute;rie</th><td>$($system.SerialNumber)</td></tr>
+                <tr><th>Marque</th><td>$(ConvertTo-HtmlSafe $system.Brand)</td></tr>
+                <tr><th>Mod&egrave;le</th><td>$(ConvertTo-HtmlSafe $system.Model)</td></tr>
+                <tr><th>Num&eacute;ro de s&eacute;rie</th><td>$(ConvertTo-HtmlSafe $system.SerialNumber)</td></tr>
                 <tr><th>Derniere mise a jour BIOS</th><td>$($system.BiosDate)</td></tr>
             </table>
         </div>
@@ -628,8 +736,8 @@ $html = @"
         <div class="section">
             <h2>CPU</h2>
             <table>
-                <tr><th>Marque</th><td>$($cpu.Brand)</td></tr>
-                <tr><th>Mod&egrave;le</th><td>$($cpu.Model)</td></tr>
+                <tr><th>Marque</th><td>$(ConvertTo-HtmlSafe $cpu.Brand)</td></tr>
+                <tr><th>Mod&egrave;le</th><td>$(ConvertTo-HtmlSafe $cpu.Model)</td></tr>
                 <tr><th>Vitesse maximale</th><td>$($cpu.Speed)</td></tr>
             </table>
         </div>
@@ -637,10 +745,11 @@ $html = @"
         <div class="section">
             <h2>RAM</h2>
             <p><strong>Total:</strong> $($ram.Total) - <strong>Slots:</strong> $($ram.MaxSlots)</p>
-            <table>
-                <tr><th>Slot</th><th>Statut</th><th>Marque</th><th>Mod&egrave;le</th><th>Capacit&eacute;</th></tr>
-                $($ram.Modules | ForEach-Object { "<tr><td>$($_.Slot)</td><td>$($_.Status)</td><td>$($_.Manufacturer)</td><td>$($_.Model)</td><td>$($_.Capacity)</td></tr>" })
-            </table>
+            $(if ($ram.Integrated) {
+                "<p><em>RAM int&eacute;gr&eacute;e/soud&eacute;e d&eacute;tect&eacute;e : le d&eacute;tail par module n'est pas disponible via SMBIOS sur ce syst&egrave;me.</em></p>"
+            } else {
+                "<table><tr><th>Slot</th><th>Statut</th><th>Marque</th><th>Mod&egrave;le</th><th>Capacit&eacute;</th></tr>$($ram.Modules | ForEach-Object { "<tr><td>$($_.Slot)</td><td>$($_.Status)</td><td>$(ConvertTo-HtmlSafe $_.Manufacturer)</td><td>$(ConvertTo-HtmlSafe $_.Model)</td><td>$($_.Capacity)</td></tr>" })</table>"
+            })
         </div>
 
         <div class="section">
@@ -684,20 +793,23 @@ $html = @"
                     }
                 }
                 
+                $rpmDisplay = if ($_.SpindleSpeed -and [int]$_.SpindleSpeed -gt 0) { "$($_.SpindleSpeed) RPM" } elseif ($_.Type -eq "SSD") { "N/A (SSD)" } else { "Not available" }
+
                 "<div style='margin-bottom: 20px; border: 1px solid #ddd; padding: 10px; border-radius: 5px;'>"
                 "<table>"
                 "<tr><th>Type</th><td>$($_.Type)</td></tr>"
                 "<tr><th>Taille</th><td>$($_.Size)</td></tr>"
+                "<tr><th>Vitesse de rotation</th><td>$rpmDisplay</td></tr>"
                 if ($smart -is [hashtable]) {
                     # Add model and serial if available
                     if ($smart.Model) {
-                        "<tr><th>Modele</th><td>$($smart.Model)</td></tr>"
+                        "<tr><th>Modele</th><td>$(ConvertTo-HtmlSafe $smart.Model)</td></tr>"
                     }
                     if ($smart.Serial -and $smart.Serial -ne "N/A") {
-                        "<tr><th>Numero de serie</th><td>$($smart.Serial)</td></tr>"
+                        "<tr><th>Numero de serie</th><td>$(ConvertTo-HtmlSafe $smart.Serial)</td></tr>"
                     }
                     if ($smart.Firmware) {
-                        "<tr><th>Firmware</th><td>$($smart.Firmware)</td></tr>"
+                        "<tr><th>Firmware</th><td>$(ConvertTo-HtmlSafe $smart.Firmware)</td></tr>"
                     }
                     
                     # SMART data with proper display
@@ -754,3 +866,48 @@ $utf8Bom = [System.Text.Encoding]::UTF8.GetPreamble()
 $htmlBytes = $utf8Bom + [System.Text.Encoding]::UTF8.GetBytes($html)
 [System.IO.File]::WriteAllBytes($path, $htmlBytes)
 Write-Host "Rapport genere a $path"
+
+# Structured export for scripted/bulk processing (one JSON file per machine)
+if (-not $NoJson) {
+    $jsonPath = [System.IO.Path]::ChangeExtension($path, "json")
+    try {
+        $reportData = @{
+            GeneratedAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            ScriptVersion = $scriptVersion
+            System = $system
+            CPU = $cpu
+            RAM = $ram
+            Disks = $hdds
+            Battery = $battery
+            GlobalAssessment = $globalAssessment
+        }
+        $jsonContent = $reportData | ConvertTo-Json -Depth 6
+        [System.IO.File]::WriteAllText($jsonPath, $jsonContent, (New-Object System.Text.UTF8Encoding($true)))
+        Write-Host "Export JSON genere a $jsonPath"
+    } catch {
+        Write-Host "Erreur lors de l'export JSON: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+# Consolidated CSV (one row per machine) for processing a batch of computers
+if (-not $NoCsvLog) {
+    $csvPath = Join-Path $reportsDir "resume.csv"
+    try {
+        $csvRow = [PSCustomObject]@{
+            DateHeure = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Marque = $system.Brand
+            Modele = $system.Model
+            NumeroSerie = $system.SerialNumber
+            CPU = $cpu.Model
+            RAM = $ram.Total
+            Disques = $summaryHDDsPlain
+            BatterieSante = if ($hasBattery) { $battery.Health } else { "N/A" }
+            ScoreGlobal = $globalAssessment.Score
+            Recommandation = $globalAssessment.Recommendation
+        }
+        $csvRow | Export-Csv -Path $csvPath -Append -NoTypeInformation -Encoding UTF8
+        Write-Host "Ligne ajoutee au resume: $csvPath"
+    } catch {
+        Write-Host "Erreur lors de l'ajout au CSV: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
