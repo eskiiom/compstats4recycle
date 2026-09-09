@@ -411,7 +411,7 @@ function Get-SMARTData {
             } catch {
                 Write-Host "smartctl introuvable, utilisation du fallback WMI (donnees SMART limitees)." -ForegroundColor Yellow
                 Write-Host "Pour des donnees SMART completes : placez smartctl.exe a cote du script," -ForegroundColor Yellow
-                Write-Host "ou installez smartmontools (https://www.smartmontools.org/)." -ForegroundColor Yellow
+                Write-Host "ou installez smartmontools (https://github.com/smartmontools/smartmontools/releases/latest)." -ForegroundColor Yellow
             }
         }
     }
@@ -834,7 +834,7 @@ $html = @"
                 "<details class='info-box'>
                     <summary>&#8505;&#65039; Donn&eacute;es SMART limit&eacute;es - comment les compl&eacute;ter ?</summary>
                     <ol>
-                        <li>T&eacute;l&eacute;charger smartmontools (version Windows, archive &laquo; without installer &raquo;) depuis <a href='https://www.smartmontools.org/wiki/Download' target='_blank' rel='noopener'>smartmontools.org</a></li>
+                        <li>T&eacute;l&eacute;charger smartmontools (version Windows, archive &laquo; without installer &raquo;) depuis <a href='https://github.com/smartmontools/smartmontools/releases/latest' target='_blank' rel='noopener'>GitHub</a> (ou, si accessible, <a href='https://www.smartmontools.org/wiki/Download' target='_blank' rel='noopener'>smartmontools.org</a>)</li>
                         <li>Dans l'archive, r&eacute;cup&eacute;rer le fichier <code>bin\smartctl.exe</code></li>
                         <li>Le copier dans le m&ecirc;me dossier que <code>CompStats.ps1</code></li>
                         <li>Relancer le script (id&eacute;alement en tant qu'administrateur) pour obtenir les donn&eacute;es SMART compl&egrave;tes</li>
