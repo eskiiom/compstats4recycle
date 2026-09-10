@@ -1070,7 +1070,17 @@ main() {
     else
         echo "Batterie        : N/A"
     fi
-    [[ "$ENCRYPTION_STATUS" != "OK" ]] && echo "Chiffrement     : non verifie"
+    if [[ "$ENCRYPTION_STATUS" != "OK" ]]; then
+        echo "Chiffrement     : non verifie"
+    fi
+
+    # Explicit success: a lone `cond && cmd` as the LAST statement in this
+    # function would otherwise make main's (and the whole script's) exit
+    # code 1 whenever the condition is false - which happened to be exactly
+    # the *good*, unremarkable case (encryption status genuinely OK), and
+    # only on a real Linux box where lsblk exists (locally, where it's
+    # missing, the condition was always true and masked this).
+    return 0
 }
 
 # Only auto-run when executed directly, not when sourced (e.g. by the test
