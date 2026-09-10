@@ -8,7 +8,7 @@ Un script dédié par système d'exploitation, chacun utilisant les outils natif
 |----|--------|---------|--------|
 | Windows | [`windows/CompStats.ps1`](windows/) | PowerShell | ✅ Disponible |
 | macOS | [`macos/compstats.py`](macos/) | Python | ✅ Disponible (non encore testé sur du vrai Mac par l'auteur — voir [macos/README.md](macos/README.md)) |
-| Linux | `linux/compstats.sh` | Bash | 🚧 À venir |
+| Linux | [`linux/compstats.sh`](linux/) | Bash | ✅ Disponible (non encore testé sur une vraie machine par l'auteur — voir [linux/README.md](linux/README.md)) |
 
 Voir le README de chaque dossier pour l'utilisation détaillée, les paramètres et les prérequis propres à cet OS.
 

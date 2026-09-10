@@ -1,0 +1,6 @@
+# Shell/Python scripts must keep LF line endings regardless of a
+# contributor's local core.autocrlf setting - a shell script checked out
+# with CRLF endings can fail outright on Linux/macOS (bad interpreter,
+# `$'\r': command not found`).
+*.sh text eol=lf
+*.py text eol=lf

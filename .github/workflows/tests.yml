@@ -51,4 +51,21 @@ jobs:
           ls -la Rapports/
           test -f Rapports/*.html
 
-  # test-linux is added alongside linux/compstats.sh as it's built.
+  test-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tests unitaires
+        run: bash test_compstats.sh
+
+      - name: Execution reelle (validation sur une vraie VM Linux)
+        run: bash compstats.sh --no-csv-log --no-index
+
+      - name: Verifier que le rapport a ete genere
+        run: |
+          ls -la Rapports/
+          test -f Rapports/*.html
