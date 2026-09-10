@@ -15,7 +15,15 @@
 # Copyright (c) 2026 Guillaume COQUEBLIN (esquimo.org)
 # Project homepage: https://github.com/eskiiom/compstats4recycle
 
-set -uo pipefail
+# Deliberately NOT using `set -u` (nounset): a bare `local var` declaration
+# (no assignment) leaves it genuinely unbound in bash, and this script
+# declares plenty of those to fill in incrementally. Under nounset, any code
+# path that reaches such a variable before it's assigned (easy to hit with
+# real-world command output that doesn't match every case tested against)
+# crashes the whole run - directly against this script's "missing data is
+# N/A, never a crash" design, matching the Windows/macOS scripts' try/catch
+# approach. `pipefail` alone is kept for legitimate pipeline-failure checks.
+set -o pipefail
 
 SCRIPT_VERSION="0.1"
 SCRIPT_DATE="2026-09-10"
