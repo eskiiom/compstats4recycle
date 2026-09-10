@@ -8,8 +8,14 @@ param(
 Write-Host "=== VALIDATION SYNTAXIQUE COMPSTATS.PS1 ===" -ForegroundColor Cyan
 Write-Host ""
 
+# $PSScriptRoot-based path: a bare relative string passed to the raw .NET
+# Parser.ParseFile() call below resolves against [Environment]::CurrentDirectory,
+# which Set-Location/cd does not reliably keep in sync with PowerShell's own
+# $PWD - this broke when running the script right after cd'ing into this folder
+$scriptPath = Join-Path $PSScriptRoot "CompStats.ps1"
+
 # Test 1: Existence du fichier
-if (-not (Test-Path "CompStats.ps1")) {
+if (-not (Test-Path $scriptPath)) {
     Write-Host "ERREUR: CompStats.ps1 non trouve" -ForegroundColor Red
     exit 1
 }
@@ -18,7 +24,7 @@ Write-Host "OK - Fichier CompStats.ps1 trouve" -ForegroundColor Green
 # Test 2: Syntaxe PowerShell
 try {
     $parseErrors = $null
-    $null = [System.Management.Automation.Language.Parser]::ParseFile("CompStats.ps1", [ref]$null, [ref]$parseErrors)
+    $null = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$null, [ref]$parseErrors)
 
     if ($parseErrors -and $parseErrors.Count -gt 0) {
         Write-Host "ERREURS DE SYNTAXE DETECTEES:" -ForegroundColor Red
@@ -34,7 +40,7 @@ try {
 }
 
 # Test 3: Fonctions requises
-$scriptContent = Get-Content "CompStats.ps1" -Raw
+$scriptContent = Get-Content $scriptPath -Raw
 
 $requiredFunctions = @(
     @{ Name = "Get-SystemInfo"; Description = "Informations systeme (marque, modele, numero de serie, date BIOS)" },

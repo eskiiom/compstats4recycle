@@ -7,8 +7,11 @@ on:
     branches: [ master ]
 
 jobs:
-  test:
+  test-windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
     steps:
       - uses: actions/checkout@v4
 
@@ -28,3 +31,6 @@ jobs:
             Write-Error "$($result.FailedCount) test(s) Pester en echec"
             exit 1
           }
+
+  # test-macos and test-linux jobs are added alongside macos/compstats.py and
+  # linux/compstats.sh as they're built.

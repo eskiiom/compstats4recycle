@@ -1,6 +1,6 @@
-# Changelog - CompStats for Recycle
+# Changelog - CompStats for Recycle (Windows)
 
-Toutes les modifications notables de ce projet seront documentées dans ce fichier.
+Toutes les modifications notables du script Windows seront documentées dans ce fichier.
 
 ## [1.9.0] - 2026-09-10
 
