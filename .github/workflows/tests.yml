@@ -32,5 +32,23 @@ jobs:
             exit 1
           }
 
-  # test-macos and test-linux jobs are added alongside macos/compstats.py and
-  # linux/compstats.sh as they're built.
+  test-macos:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tests unitaires
+        run: python3 -m unittest test_compstats -v
+
+      - name: Execution reelle (validation sur du materiel Apple reel)
+        run: python3 compstats.py --no-csv-log --no-index
+
+      - name: Verifier que le rapport a ete genere
+        run: |
+          ls -la Rapports/
+          test -f Rapports/*.html
+
+  # test-linux is added alongside linux/compstats.sh as it's built.

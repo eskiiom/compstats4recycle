@@ -6,3 +6,7 @@ Rapports/resume.csv
 # Ignore smartctl.exe / smartmontools installer if downloaded
 smartctl.exe
 smartmontools-*.exe
+
+# Python
+__pycache__/
+*.pyc
